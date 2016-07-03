@@ -1,0 +1,5 @@
+# lo extension
+comment = 'bit interleaving stuff'
+default_version = '1.1'
+module_pathname = '$libdir/zcurve'
+relocatable = true
