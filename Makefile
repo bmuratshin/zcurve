@@ -2,7 +2,7 @@
 
 MODULE_big = zcurve
 
-OBJS = zcurve.o sp_tree_2d.o $(WIN32RES)
+OBJS = zcurve.o sp_tree_2d.o mempool.o spatialIndex_2d.o $(WIN32RES)
 
 EXTENSION = zcurve
 DATA = zcurve--1.1.sql zcurve--unpackaged-1.1.sql
