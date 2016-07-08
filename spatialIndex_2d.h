@@ -4,7 +4,7 @@
 #include "mempool.h"
 #include "sp_tree_2d.h"
 
-// bit2Key stuff -------------------------------------------------------------------------------
+/* bit2Key stuff ------------------------------------------------------------------------------- */
 struct bit2Key_s {
 	uint64 val_;
 };
@@ -20,7 +20,7 @@ extern void  bit2Key_fromXY (bit2Key_t *pk, uint32 x, uint32 y);
 extern void  bit2Key_toXY (bit2Key_t *pk, uint32 *x, uint32 *y);
 
 
-// spatial2Query stuff -------------------------------------------------------------------------------
+/* spatial2Query stuff ------------------------------------------------------------------------------- */
 
 struct spatial2Query_s {
 	bit2Key_t lowKey;
@@ -49,15 +49,16 @@ struct spt_query2_def_s {
 };
 typedef struct spt_query2_def_s spt_query2_def_t;
 
-extern void spt_query2_def_t_CTOR (spt_query2_def_t *ps);
+extern void spt_query2_def_t_CTOR (spt_query2_def_t *ps, Relation rel, uint32 minx, uint32 miny, uint32 maxx, uint32 maxy);
 extern void spt_query2_def_t_DTOR (spt_query2_def_t *ps);
 
 
-// BTree2dPointSpatial stuff -------------------------------------------------------------------------------
+/* BTree2dPointSpatial stuff ------------------------------------------------------------------------------- */
 
 extern int  pointSpatial2d_moveFirst(spt_query2_def_t *q);
 extern int  pointSpatial2d_moveNext(spt_query2_def_t *q);
-//extern void PointSpatial2d_toLong(key_long_t &str, const point2d &rt, const rect2d &extent);
+
+/*private*/
 extern void pointSpatial2d_closeQuery(spt_query2_def_t *q);
 extern spatial2Query_t *pointSpatial2d_createQuery (spt_query2_def_t *q);
 extern void pointSpatial2d_freeQuery (spt_query2_def_t *q, spatial2Query_t *);

@@ -119,16 +119,20 @@ bit2Key_toLong (const bit2Key_t *pk, uint64 *buffer)
 	*buffer = pk->val_;
 }
 
-//-----------------------------------------------------------------------
+/*-----------------------------------------------------------------------*/
 
 void 
-spt_query2_def_t_CTOR (spt_query2_def_t *ps)
+spt_query2_def_t_CTOR (spt_query2_def_t *ps, Relation rel, uint32 minx, uint32 miny, uint32 maxx, uint32 maxy)
 {
 	Assert(NULL != ps);
 	ps->queryHead = NULL;
 	ps->freeHead = NULL;
+	ps->minX_ = minx;
+	ps->minY_ = miny;
+	ps->maxX_ = maxx;
+	ps->maxY_ = maxy;
 	mp_CTOR(&ps->memAlloc);
-	zcurve_scan_ctx_CTOR(&ps->qctx_, NULL, 0);
+	zcurve_scan_ctx_CTOR(&ps->qctx_, rel, 0);
 }
 
 void 
@@ -190,12 +194,14 @@ pointSpatial2d_releaseSubQuery(spt_query2_def_t *q)
 void 
 pointSpatial2d_setSpatialQuery(spt_query2_def_t *q)
 {
+	/*elog(INFO, "setSpatialQuery[%d %d .. %d %d]", q->minX_, q->minY_, q->maxX_, q->maxY_);*/
 	q->queryHead = pointSpatial2d_createQuery (q);
 	q->queryHead->prevQuery = NULL;
 	q->queryHead->curBitNum = 63;
 
 	bit2Key_fromXY(&q->queryHead->lowKey, q->minX_, q->minY_);
 	bit2Key_fromXY(&q->queryHead->highKey, q->maxX_, q->maxY_);
+	/*elog(INFO, "setSpatialQuery(%lx, %lx)", q->queryHead->lowKey.val_, q->queryHead->highKey.val_);*/
 }
 
 int
@@ -214,14 +220,11 @@ pointSpatial2d_moveNext (spt_query2_def_t *q)
 	if (q->subQueryFinished)
     		return pointSpatial2d_findNextMatch(q);
 
-//	if (q->qctx_.offset_ == q->qctx_.max_offset_)
-//	{
-		if(!pointSpatial2d_checkNextPage(q))
-		{
-			pointSpatial2d_releaseSubQuery(q);
-			return pointSpatial2d_findNextMatch(q);
-		}
-//	}
+	if(!pointSpatial2d_checkNextPage(q))
+	{
+		pointSpatial2d_releaseSubQuery(q);
+		return pointSpatial2d_findNextMatch(q);
+	}
 
 	if (!pointSpatial2d_queryNextKey(q))
 	{
@@ -229,25 +232,19 @@ pointSpatial2d_moveNext (spt_query2_def_t *q)
 		return 0;
 	}
 
-	bit2Key_fromLong(&q->currentKey, &q->qctx_.cur_val_);
 	while (!(q->currentKey.val_ > q->queryHead->highKey.val_))
 	{
 		if (pointSpatial2d_checkKey(q))
 			return 1;
 
-//		if (q->qctx_.offset_ == q->qctx_.max_offset_)
-//		{
-			if (!pointSpatial2d_checkNextPage(q))
-				break;
-//		}  
+		if (!pointSpatial2d_checkNextPage(q))
+			break;
 
 		if (!pointSpatial2d_queryNextKey(q))
 		{
 			pointSpatial2d_closeQuery(q);
 			return 0;
 		}
-
-		bit2Key_fromLong(&q->currentKey, &q->qctx_.cur_val_);
 	}
 	pointSpatial2d_releaseSubQuery(q);
 	return pointSpatial2d_findNextMatch(q);
@@ -275,23 +272,27 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 	Assert(q);
 	while(q->queryHead)
 	{
+		elog(INFO, "1)[%lx]", q->queryHead->lowKey.val_);
 		q->subQueryFinished = 0;
 		if(!pointSpatial2d_queryFind(q, q->queryHead->lowKey.val_))
 		{
 			pointSpatial2d_closeQuery (q);
 			return 0;
 		}
-		q->currentKey.val_ = q->qctx_.cur_val_;// fromLong (tmp->val);
-		q->lastKey.val_ = q->qctx_.last_page_val_;//fromLong (pkey->val);
 
+		/*elog(INFO, "findNextMatch(%lx %lx)", q->currentKey.val_, q->lastKey.val_);*/
 		while (q->lastKey.val_ < q->queryHead->highKey.val_)
-		{//split query
+		{
+			/*split query*/
+			spatial2Query_t *subQuery = NULL;
 			while ( bit2Key_getBit(&q->queryHead->lowKey, q->queryHead->curBitNum) == 
 				bit2Key_getBit(&q->queryHead->highKey, q->queryHead->curBitNum))
 			{
 				q->queryHead->curBitNum--;
 			}
-			spatial2Query_t *subQuery = pointSpatial2d_createQuery (q);
+			/*elog(INFO, "findNextMatch(curbit=%d)", q->queryHead->curBitNum);*/
+
+			subQuery = pointSpatial2d_createQuery (q);
 			subQuery->prevQuery = q->queryHead;
 			subQuery->lowKey = q->queryHead->lowKey;
 			subQuery->highKey = q->queryHead->highKey;
@@ -300,8 +301,21 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 			subQuery->curBitNum = --q->queryHead->curBitNum;
 			q->queryHead = subQuery;
 			q->subQueryFinished = 0;
+			{
+				uint32 x0,y0;
+				uint32 x1,y1;
+
+				bit2Key_toXY(&q->queryHead->lowKey, &x0, &y0);
+				bit2Key_toXY(&q->queryHead->highKey, &x1, &y1);
+				elog(INFO, "Q[%d %d %d %d]",x0, y0, x1, y1);
+
+				bit2Key_toXY(&subQuery->lowKey, &x0, &y0);
+				bit2Key_toXY(&subQuery->highKey, &x1, &y1);
+				elog(INFO, "Q[%d %d %d %d]",x0, y0, x1, y1);
+			}
 		}
-        	while (!(q->currentKey.val_ > q->queryHead->highKey.val_))
+		/*elog(INFO, "findNextMatch 2(%lx %lx)", q->currentKey.val_, q->lastKey.val_);*/
+        	while (q->currentKey.val_ <= q->queryHead->highKey.val_)
 		{
 			if (pointSpatial2d_checkKey(q))
 				return 1;
@@ -312,8 +326,6 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 				pointSpatial2d_closeQuery(q);
                 		return 0;
 			}
-//            getAggregateStub ()->getKeyPart (q.tmpKey, 0, tmp);
-			q->currentKey.val_ = q->qctx_.cur_val_;//fromLong (tmp->val);
 		}
 		pointSpatial2d_releaseSubQuery(q);
 	}
@@ -340,6 +352,11 @@ pointSpatial2d_checkKey (spt_query2_def_t *q)
 		if (tmpK > tmpH)
 			return 0;
 	}
+	{
+		uint32 x, y;
+		bit2Key_toXY (&q->currentKey, &x, &y);
+		elog(INFO, "\t\tYes: %lx %d %d", q->currentKey.val_, x, y);
+	}
 	return 1;
 }
 
@@ -347,12 +364,19 @@ pointSpatial2d_checkKey (spt_query2_def_t *q)
 int
 pointSpatial2d_queryFind (spt_query2_def_t *q, uint64 start_val)
 {
-	return zcurve_scan_move_first(&q->qctx_, start_val);
+	int ret = zcurve_scan_move_first(&q->qctx_, start_val);
+	Assert(q);
+	q->currentKey.val_ = q->qctx_.cur_val_;
+	q->lastKey.val_ = q->qctx_.last_page_val_;
+	return ret;
 }
 
 int
 pointSpatial2d_queryNextKey (spt_query2_def_t *q)
 {
-	return zcurve_scan_move_next(&q->qctx_);
+	int ret = zcurve_scan_move_next(&q->qctx_);
+	Assert(q);
+	q->currentKey.val_ = q->qctx_.cur_val_;
+	return ret;
 }
 

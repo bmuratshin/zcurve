@@ -18,7 +18,7 @@
 #include "storage/bufpage.h"
 
 #include "sp_tree_2d.h"
-
+#include "spatialIndex_2d.h"
 
 int32
 zcurve_compare(Relation rel,
@@ -149,7 +149,7 @@ zcurve_binsrch(Relation rel,
 
 		/* We have low <= mid < high, so mid points at a real slot */
 
-//elog(INFO, "(%d .. %d .. %d)", low, mid, high);
+		/* elog(INFO, "(%d .. %d .. %d)", low, mid, high); */
 		result = zcurve_compare(rel, keysz, scankey, page, mid);
 
 		if (result >= cmpval)
@@ -165,7 +165,7 @@ zcurve_binsrch(Relation rel,
 	 * scan key), which could be the last slot + 1.
 	 */
 
-elog(INFO, "bsearch %d", low);
+	/*elog(INFO, "bsearch %d", low);*/
 	if (P_ISLEAF(opaque))
 		return low;
 
@@ -247,9 +247,6 @@ zcurve_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 		opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 		if (P_ISLEAF(opaque))
 			break;
-
-		//if (1 == ilevel)
-		//	trace_page(rel, scankey, page);
 
 		/*
 		 * Find the appropriate item on the internal page, and get the child
@@ -341,7 +338,7 @@ trace_tree_by_val(Relation rel, uint64 zv)
 	int ilevel;
 
 	ScanKeyInit(	&skey,
-			1, // key part idx
+			1, /* key part idx */
 			BTLessStrategyNumber, 
 			F_INT8LE,
 			Int64GetDatum(zv));
@@ -414,24 +411,41 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 	uint64 y0  = PG_GETARG_INT64(2);
 	uint64 x1  = PG_GETARG_INT64(3);
 	uint64 y1  = PG_GETARG_INT64(4);
-	uint64 start_zv;
+	uint64 cnt = 0;
 
 	List	   *relname_list;
 	RangeVar   *relvar;
 	Relation    relation;
 
-	start_zv = zcurve_fromXY(x0, y0);
 	relname_list = stringToQualifiedNameList(relname);
 	relvar = makeRangeVarFromNameList(relname_list);
 	relation = indexOpen(relvar);
 
-	elog(INFO, "%s(%ld) height(%d) nattrs(%d)", relname, start_zv, _bt_getrootheight(relation), RelationGetNumberOfAttributes(relation));
-	trace_tree_by_val(relation, start_zv);
+	/*elog(INFO, "%s height(%d) nattrs(%d)", relname, _bt_getrootheight(relation), RelationGetNumberOfAttributes(relation));*/
+
+
+	{
+		/*trace_tree_by_val(relation, start_zv);*/
+		spt_query2_def_t qdef;
+		int ret = 0;
+
+		spt_query2_def_t_CTOR (&qdef, relation, x0, y0, x1, y1);
+
+		ret = pointSpatial2d_moveFirst(&qdef);
+		/*elog(INFO, "moveFirst returns %d", ret);*/
+		while (ret)
+		{
+			cnt++;
+			ret = pointSpatial2d_moveNext(&qdef);
+		}
+		spt_query2_def_t_DTOR (&qdef);
+		/*elog(INFO, "DTOR'ed spt_query2_def_t");*/
+	}
 
 	indexClose(relation);
 
 	PG_FREE_IF_COPY(relname, 0);
-   	PG_RETURN_INT64(11);
+   	PG_RETURN_INT64(cnt);
 }
 
 int 
@@ -446,25 +460,66 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 	Datum		arg;
 	bool		null;
 
+	/*elog(INFO, "zcurve_scan_move_first(%lx)", start_val);*/
+
+	if (ctx->buf_)
+		_bt_relbuf(ctx->rel_, ctx->buf_);
+
+	ctx->init_zv_ = start_val;
 	ctx->skey_.sk_argument = Int64GetDatum(start_val);
+
 	pstack = zcurve_search(ctx->rel_, 1, &ctx->skey_, nextkey,  &ctx->buf_, BT_READ);
 	if (NULL == pstack)
 		return 0;
 
+	_bt_freestack(pstack);
+	pstack = NULL;
+
 	ctx->offset_ = zcurve_binsrch(ctx->rel_, ctx->buf_, 1, &ctx->skey_, nextkey);
 	page = BufferGetPage(ctx->buf_);
 	ctx->max_offset_ = PageGetMaxOffsetNumber(page);
+	if (ctx->offset_ <= ctx->max_offset_)
+	{
+		itemid = PageGetItemId(page, ctx->offset_);
+		itup = (IndexTuple) PageGetItem(page, itemid);
+		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+		ctx->cur_val_ = DatumGetInt64(arg);
 
-	itemid = PageGetItemId(page, ctx->offset_);
-	itup = (IndexTuple) PageGetItem(page, itemid);
-	arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-	ctx->cur_val_ = DatumGetInt64(arg);
+		itemid = PageGetItemId(page, ctx->max_offset_);
+		itup = (IndexTuple) PageGetItem(page, itemid);
+		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+		ctx->last_page_val_ = DatumGetInt64(arg);
 
-	itemid = PageGetItemId(page, ctx->max_offset_);
-	itup = (IndexTuple) PageGetItem(page, itemid);
-	arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-	ctx->last_page_val_ = DatumGetInt64(arg);
-	return 1;
+		/*elog(INFO, "zcurve_scan_move_first (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
+		return 1;
+	}
+	elog(INFO, "zcurve_scan_move_first (EOF)");
+	return 0;
+}
+
+int 
+zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
+{
+	Assert(ctx);
+	/*elog(INFO, "zcurve_scan_move_next");*/
+	if (ctx->offset_ < ctx->max_offset_)
+	{
+		Page 	page;
+		ItemId		itemid;
+		IndexTuple	itup;
+		Datum		arg;
+		bool		null;
+
+		ctx->offset_++;
+		page = BufferGetPage(ctx->buf_);
+		itemid = PageGetItemId(page, ctx->offset_);
+		itup = (IndexTuple) PageGetItem(page, itemid);
+		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+		ctx->cur_val_ = DatumGetInt64(arg);
+/*		elog(INFO, "zcurve_scan_move_next (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
+		return 1;
+	}
+	return 0;
 }
 
 int 
@@ -474,22 +529,25 @@ zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, uint64 start_val)
 	ctx->rel_ = rel;
 	ctx->init_zv_ = start_val;
 	ScanKeyInit(&ctx->skey_, 1/*key part idx*/, BTLessStrategyNumber, F_INT8LE, Int64GetDatum(start_val));
+	ctx->offset_ = 0;
+	ctx->max_offset_ = 0;
+	ctx->cur_val_ = 0;
+	ctx->last_page_val_ = 0;
+	ctx->buf_ = 0;
+	/*elog(INFO, "zcurve_scan_ctx_CTOR(%ld)", sizeof(ctx->buf_));*/
 	return 1;
 }
 
-int zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
-{
-	return 0;
-}
-
-int zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx)
+int 
+zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx)
 {
 	Assert(ctx);
 	if (ctx->rel_)
 	{
-		_bt_relbuf(ctx->rel_, ctx->buf_);
-		_bt_freeskey(&ctx->skey_);
+		if (ctx->buf_)
+			_bt_relbuf(ctx->rel_, ctx->buf_);
 		memset(ctx, 0, sizeof(*ctx));
+		/*elog(INFO, "zcurve_scan_ctx_DTOR");*/
 		return 0;
 	}
 	return -1;

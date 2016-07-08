@@ -148,7 +148,7 @@ run_interval_request(SPIPlanPtr pplan, uint64 v0, uint64 v1)
 			for (i = 0; i < SPI_processed; i++)
 			{
 				HeapTuple tuple = SPI_tuptable->vals[i];
-				//elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2));
+				/*elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2));*/
 				cnt++;
 			}
 		}
@@ -198,7 +198,7 @@ zcurve_oids_by_extent(PG_FUNCTION_ARGS)
 
    pplan = prep_interval_request();
    {
-//	FILE *fl = fopen("/tmp/ttt.sql", "w");
+/*	FILE *fl = fopen("/tmp/ttt.sql", "w");*/
 	int cur_start = 0; 
 	int ix;
 	for (ix = cur_start + 1; ix < sz; ix++)
@@ -206,19 +206,19 @@ zcurve_oids_by_extent(PG_FUNCTION_ARGS)
 		if (ids[ix] != ids[ix - 1] + 1)
 		{
 			cnt += run_interval_request(pplan, ids[cur_start], ids[ix - 1]);
-//			fprintf(fl, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld;\n", ids[cur_start], ids[ix - 1]);
-//			elog(INFO, "%d -> %d (%ld -> %ld)", cur_start, ix - 1, ids[cur_start], ids[ix - 1]);
-//			cnt++;
+/*			fprintf(fl, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld;\n", ids[cur_start], ids[ix - 1]);
+			elog(INFO, "%d -> %d (%ld -> %ld)", cur_start, ix - 1, ids[cur_start], ids[ix - 1]);
+			cnt++;*/
 			cur_start = ix;
 		}
 	}
     	if (cur_start != ix)
 	{
 			cnt += run_interval_request(pplan, ids[cur_start], ids[ix - 1]);
-//			fprintf(fl, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld;\n", ids[cur_start], ids[ix - 1]);
-//			elog(INFO, "%d -> %d (%ld -> %ld)", cur_start, ix - 1, ids[cur_start], ids[ix - 1]);
+/*			fprintf(fl, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld;\n", ids[cur_start], ids[ix - 1]);
+			elog(INFO, "%d -> %d (%ld -> %ld)", cur_start, ix - 1, ids[cur_start], ids[ix - 1]);*/
 	}
-//	fclose(fl);
+/*	fclose(fl);*/
    }
    fin_interval_request(pplan);
    pfree(ids);
@@ -226,7 +226,7 @@ zcurve_oids_by_extent(PG_FUNCTION_ARGS)
    PG_RETURN_INT64(cnt);
 }
 
-//------------------------------------------------------------------------------------------------
+/*------------------------------------------------------------------------------------------------ */
 
 struct interval_ctx_s {
 	SPIPlanPtr	cr_;
@@ -276,12 +276,6 @@ probe_interval_request_ii(interval_ctx_t *ctx, uint64 v0)
 	Portal 		portal;
 
 	values[0] = Int64GetDatum(v0);
-	{
-//		uint32 lx, ly;
-//		zcurve_toXY (v0, &lx, &ly);
-//
-//		elog(INFO, "probe(%ld:%d,%d)", v0, lx, ly);
-	}
 
 	if (ctx->fl_)
 		fprintf(ctx->fl_, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld order by zcurve_val_from_xy(x::int4, y::int4) limit 1;\n", v0, ctx->top_val_);
@@ -302,7 +296,7 @@ probe_interval_request_ii(interval_ctx_t *ctx, uint64 v0)
 			dx = SPI_getbinval(tuple, tupdesc, 1, &isnull);
 			dy = SPI_getbinval(tuple, tupdesc, 2, &isnull);
 			zv = zcurve_fromXY(DatumGetInt64(dx), DatumGetInt64(dy));
-//			elog(INFO, "%ld %ld -> %ld", DatumGetInt64(dx), DatumGetInt64(dy), zv);
+/*			elog(INFO, "%ld %ld -> %ld", DatumGetInt64(dx), DatumGetInt64(dy), zv); */
 
 			ctx->cur_val_ = zv;
 			SPI_cursor_close(portal);
@@ -323,7 +317,6 @@ run_interval_request_ii(interval_ctx_t *ctx, uint64 v0, uint64 v1)
 
 	values[0] = Int64GetDatum(v0);
 	values[1] = Int64GetDatum(v1);
-//	elog(INFO, "[%ld %ld]", v0, v1);
 
 	if (ctx->fl_)
 		fprintf(ctx->fl_, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld;\n", v0, v1);
@@ -341,7 +334,7 @@ run_interval_request_ii(interval_ctx_t *ctx, uint64 v0, uint64 v1)
 			for (i = 0; i < SPI_processed; i++)
 			{
 				HeapTuple tuple = SPI_tuptable->vals[i];
-//				elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2));
+/*				elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2)); */
 				cnt++;
 			}
 		}
@@ -391,7 +384,7 @@ zcurve_oids_by_extent_ii(PG_FUNCTION_ARGS)
    ctx.cur_val_ = 0;
    ctx.cr_ = NULL;
    ctx.probe_cr_ = NULL;
-   ctx.fl_ = NULL;//fopen("/tmp/ttt.sql", "w");
+   ctx.fl_ = NULL;/*fopen("/tmp/ttt.sql", "w"); */
    
    cnt = 0;
 
@@ -404,16 +397,12 @@ zcurve_oids_by_extent_ii(PG_FUNCTION_ARGS)
 		if (0 == probe_interval_request_ii(&ctx, ids[cur_start]))
 			break;
 		for (; cur_start < sz && ids[cur_start] < ctx.cur_val_; cur_start++);
-//		if (ctx.cur_val_ != ids[cur_start])
-//		{
-//			cur_start++;
-//			continue;
-//		}
+
 		ix = cur_start + 1;
                 if (ix >= sz)
 			break;
 		for (; ix < sz && ids[ix] == ids[ix - 1] + 1; ix++);
-//elog(INFO, "%d %d %d", ix, cur_start, sz);
+
 		cnt += run_interval_request_ii(&ctx, ids[cur_start], ids[ix - 1]);
 		cur_start = ix;
 	}

@@ -9,8 +9,8 @@
 #endif
 
 static const int mp_block_size = (8192);
-#define __ALLOC(a) (/*test_*/calloc(a,1))
-#define __FREE(a, b) (free (a))
+#define __ALLOC(a) (/*test_*/palloc(a))
+#define __FREE(a, b) (pfree (a))
 
 
 size_t mp_size(mem_pool_t *mp)  
