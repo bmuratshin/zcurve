@@ -183,6 +183,12 @@ pointSpatial2d_releaseSubQuery(spt_query2_def_t *q)
 	Assert(q);
 	if(q->queryHead)
 	{
+		/*uint32 x0,y0;
+		uint32 x1,y1;
+		bit2Key_toXY(&q->queryHead->lowKey, &x0, &y0);
+		bit2Key_toXY(&q->queryHead->highKey, &x1, &y1);
+		elog(INFO, "F[%d %d %d %d]",x0, y0, x1, y1);*/
+
 		spatial2Query_t *prevQuery = q->queryHead->prevQuery;
 		pointSpatial2d_freeQuery(q, q->queryHead);
 		q->queryHead = prevQuery;
@@ -272,7 +278,7 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 	Assert(q);
 	while(q->queryHead)
 	{
-		elog(INFO, "1)[%lx]", q->queryHead->lowKey.val_);
+		/*elog(INFO, "1)[%lx]", q->queryHead->lowKey.val_);*/
 		q->subQueryFinished = 0;
 		if(!pointSpatial2d_queryFind(q, q->queryHead->lowKey.val_))
 		{
@@ -280,7 +286,7 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 			return 0;
 		}
 
-		/*elog(INFO, "findNextMatch(%lx %lx)", q->currentKey.val_, q->lastKey.val_);*/
+		/*elog(INFO, "findNextMatch(%lx %lx %lx)", q->currentKey.val_, q->lastKey.val_, q->queryHead->highKey.val_);*/
 		while (q->lastKey.val_ < q->queryHead->highKey.val_)
 		{
 			/*split query*/
@@ -299,9 +305,8 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 			bit2Key_setLowBits(&subQuery->highKey, q->queryHead->curBitNum);
 			bit2Key_clearLowBits(&q->queryHead->lowKey, q->queryHead->curBitNum);
 			subQuery->curBitNum = --q->queryHead->curBitNum;
-			q->queryHead = subQuery;
-			q->subQueryFinished = 0;
-			{
+
+			/*{
 				uint32 x0,y0;
 				uint32 x1,y1;
 
@@ -312,7 +317,10 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 				bit2Key_toXY(&subQuery->lowKey, &x0, &y0);
 				bit2Key_toXY(&subQuery->highKey, &x1, &y1);
 				elog(INFO, "Q[%d %d %d %d]",x0, y0, x1, y1);
-			}
+			}*/
+
+			q->queryHead = subQuery;
+			q->subQueryFinished = 0;
 		}
 		/*elog(INFO, "findNextMatch 2(%lx %lx)", q->currentKey.val_, q->lastKey.val_);*/
         	while (q->currentKey.val_ <= q->queryHead->highKey.val_)
@@ -352,11 +360,11 @@ pointSpatial2d_checkKey (spt_query2_def_t *q)
 		if (tmpK > tmpH)
 			return 0;
 	}
-	{
+	/*{
 		uint32 x, y;
 		bit2Key_toXY (&q->currentKey, &x, &y);
 		elog(INFO, "\t\tYes: %lx %d %d", q->currentKey.val_, x, y);
-	}
+	}*/
 	return 1;
 }
 
@@ -368,6 +376,7 @@ pointSpatial2d_queryFind (spt_query2_def_t *q, uint64 start_val)
 	Assert(q);
 	q->currentKey.val_ = q->qctx_.cur_val_;
 	q->lastKey.val_ = q->qctx_.last_page_val_;
+	/*elog(INFO, "Found: %lx %lx", q->currentKey.val_, q->lastKey.val_);*/
 	return ret;
 }
 

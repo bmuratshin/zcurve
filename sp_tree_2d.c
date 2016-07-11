@@ -241,9 +241,9 @@ zcurve_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 		*bufP = _bt_moveright(rel, *bufP, keysz, scankey, nextkey,
 							  (access == BT_WRITE), stack_in,
 							  BT_READ);
-
 		/* if this is a leaf page, we're done */
 		page = BufferGetPage(*bufP);
+
 		opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 		if (P_ISLEAF(opaque))
 			break;
@@ -339,19 +339,19 @@ trace_tree_by_val(Relation rel, uint64 zv)
 
 	ScanKeyInit(	&skey,
 			1, /* key part idx */
-			BTLessStrategyNumber, 
-			F_INT8LE,
+			BTGreaterStrategyNumber, 
+			F_INT8GE,
 			Int64GetDatum(zv));
 
 	pstack = zcurve_search(rel, 1, &skey, nextkey,  &buf, BT_READ);
 	offnum = zcurve_binsrch(rel, buf, 1, &skey, nextkey);
-	elog(INFO, "found(%d)", offnum);
+	/*elog(INFO, "found(%d)", offnum);*/
 
 	ilevel = 0;
 	stack = pstack;
 	for (;;)
 	{
-		elog(INFO, "level(%d) blkno(%d) offset(%d)", ilevel++, stack->bts_blkno, stack->bts_offset);
+		/*elog(INFO, "level(%d) blkno(%d) offset(%d)", ilevel++, stack->bts_blkno, stack->bts_offset);*/
 
 		if (stack->bts_parent == NULL)
 			break;
@@ -451,9 +451,10 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 int 
 zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 {
-	BTStack	pstack = NULL;
+	BTStack	pstack = NULL, stack = NULL;
 	bool 	nextkey = 0;
 	Page 	page;
+	int 	ilevel = 0;
 
 	ItemId		itemid;
 	IndexTuple	itup;
@@ -461,6 +462,7 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 	bool		null;
 
 	/*elog(INFO, "zcurve_scan_move_first(%lx)", start_val);*/
+
 
 	if (ctx->buf_)
 		_bt_relbuf(ctx->rel_, ctx->buf_);
@@ -471,9 +473,6 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 	pstack = zcurve_search(ctx->rel_, 1, &ctx->skey_, nextkey,  &ctx->buf_, BT_READ);
 	if (NULL == pstack)
 		return 0;
-
-	_bt_freestack(pstack);
-	pstack = NULL;
 
 	ctx->offset_ = zcurve_binsrch(ctx->rel_, ctx->buf_, 1, &ctx->skey_, nextkey);
 	page = BufferGetPage(ctx->buf_);
@@ -490,10 +489,72 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->last_page_val_ = DatumGetInt64(arg);
 
+		_bt_freestack(pstack);
+		pstack = NULL;
+
 		/*elog(INFO, "zcurve_scan_move_first (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
 		return 1;
 	}
-	elog(INFO, "zcurve_scan_move_first (EOF)");
+	else
+	{
+		ilevel = 0;
+		stack = pstack;
+		for (;;)
+		{
+			BTPageOpaque opaque;
+			OffsetNumber mx = 0;
+			ilevel++;
+
+			/*elog(INFO, "level(%d) blkno(%d) offset(%d)", ilevel - 1, stack->bts_blkno, stack->bts_offset);*/
+
+			/* drop the read lock on the parent page, acquire one on the child */
+			ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, stack->bts_blkno, BT_READ);
+			page = BufferGetPage(ctx->buf_);
+			mx = PageGetMaxOffsetNumber(page);
+			if (stack->bts_offset < mx)
+			{
+				int i;
+				stack->bts_offset++;
+				for (i = 0; i < ilevel; i++)
+				{
+					BlockNumber  blkno;
+					opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+					ctx->offset_ = P_FIRSTDATAKEY(opaque);
+					itemid = PageGetItemId(page, stack->bts_offset);
+					itup = (IndexTuple) PageGetItem(page, itemid);
+					blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
+					/*elog (INFO, "BLKNO=%d", blkno);*/
+					ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno /*stack->bts_blkno*/, BT_READ);
+					page = BufferGetPage(ctx->buf_);
+				}
+				ctx->max_offset_ = PageGetMaxOffsetNumber(page);
+				itemid = PageGetItemId(page, ctx->offset_);
+				itup = (IndexTuple) PageGetItem(page, itemid);
+				arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+				ctx->cur_val_ = DatumGetInt64(arg);
+
+				itemid = PageGetItemId(page, ctx->max_offset_);
+				itup = (IndexTuple) PageGetItem(page, itemid);
+				arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+				ctx->last_page_val_ = DatumGetInt64(arg);
+
+				_bt_freestack(pstack);
+				pstack = NULL;
+
+				/*elog(INFO, "zcurve_scan_move_first (EOF)(%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
+				return 1;
+			}
+
+			if (stack->bts_parent == NULL)
+				break;
+
+			stack = stack->bts_parent;
+		}
+	}
+
+	if (pstack)
+		_bt_freestack(pstack);
+	/*elog(INFO, "zcurve_scan_move_first (EOF)[%d %d]", ctx->offset_, ctx->max_offset_);*/
 	return 0;
 }
 
