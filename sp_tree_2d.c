@@ -9,6 +9,7 @@
 #include "postgres.h"
 #include "catalog/pg_type.h"
 #include "fmgr.h"
+#include "funcapi.h"
 #include "utils/rel.h"
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
@@ -326,52 +327,8 @@ indexClose(Relation r)
 	index_close((r), AccessShareLock);
 }
 
-int 
-trace_tree_by_val(Relation rel, uint64 zv)
-{
-	ScanKeyData skey;
-	BTStack	    pstack = NULL, stack = NULL;
-	bool nextkey = 0;
-	int offnum;
-
-	Buffer buf;
-	int ilevel;
-
-	ScanKeyInit(	&skey,
-			1, /* key part idx */
-			BTGreaterStrategyNumber, 
-			F_INT8GE,
-			Int64GetDatum(zv));
-
-	pstack = zcurve_search(rel, 1, &skey, nextkey,  &buf, BT_READ);
-	offnum = zcurve_binsrch(rel, buf, 1, &skey, nextkey);
-	/*elog(INFO, "found(%d)", offnum);*/
-
-	ilevel = 0;
-	stack = pstack;
-	for (;;)
-	{
-		/*elog(INFO, "level(%d) blkno(%d) offset(%d)", ilevel++, stack->bts_blkno, stack->bts_offset);*/
-
-		if (stack->bts_parent == NULL)
-			break;
-
-		stack = stack->bts_parent;
-	}
-	
-	{
-		Page		page;
-		page = BufferGetPage(buf);
-		trace_page(rel, &skey, page);
-	}
-
-	_bt_relbuf(rel, buf);
-	_bt_freestack(pstack);
-	_bt_freeskey(&skey);
-  	return 0;
-}
-
-void trace_page(Relation rel, ScanKey skey, Page page)
+static void 
+trace_page_2d(Relation rel, ScanKey skey, Page page)
 {
 	ItemId		itemid;
 	IndexTuple	itup;
@@ -402,9 +359,9 @@ void trace_page(Relation rel, ScanKey skey, Page page)
 }
 
 
-PG_FUNCTION_INFO_V1(zcurve_2d_lookup);
+PG_FUNCTION_INFO_V1(zcurve_2d_count);
 Datum
-zcurve_2d_lookup(PG_FUNCTION_ARGS)
+zcurve_2d_count(PG_FUNCTION_ARGS)
 {
 	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
   	uint64 x0  = PG_GETARG_INT64(1);
@@ -428,15 +385,16 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		/*trace_tree_by_val(relation, start_zv);*/
 		spt_query2_def_t qdef;
 		int ret = 0;
+		uint32 x, y;
 
 		spt_query2_def_t_CTOR (&qdef, relation, x0, y0, x1, y1);
 
-		ret = pointSpatial2d_moveFirst(&qdef);
+		ret = pointSpatial2d_moveFirst(&qdef, &x, &y);
 		/*elog(INFO, "moveFirst returns %d", ret);*/
 		while (ret)
 		{
 			cnt++;
-			ret = pointSpatial2d_moveNext(&qdef);
+			ret = pointSpatial2d_moveNext(&qdef, &x, &y);
 		}
 		spt_query2_def_t_DTOR (&qdef);
 		/*elog(INFO, "DTOR'ed spt_query2_def_t");*/
@@ -446,6 +404,120 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 
 	PG_FREE_IF_COPY(relname, 0);
    	PG_RETURN_INT64(cnt);
+}
+
+struct p2d_ctx_s {
+	Relation    relation_;
+	spt_query2_def_t qdef_;
+	int cnt_;
+};
+typedef struct p2d_ctx_s p2d_ctx_t;
+void p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64 x1, uint64 y1);
+void p2d_ctx_t_DTOR(p2d_ctx_t *ptr);
+
+void p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64 x1, uint64 y1)
+{
+	List	   *relname_list;
+	RangeVar   *relvar;
+
+	Assert(ptr);
+
+	relname_list = stringToQualifiedNameList(relname);
+	relvar = makeRangeVarFromNameList(relname_list);
+	ptr->relation_ = indexOpen(relvar);
+	ptr->cnt_ = 0;
+	spt_query2_def_t_CTOR (&ptr->qdef_, ptr->relation_, x0, y0, x1, y1);
+}
+
+void p2d_ctx_t_DTOR(p2d_ctx_t *ptr)
+{
+	Assert(ptr);
+	indexClose(ptr->relation_);
+	spt_query2_def_t_DTOR (&ptr->qdef_);
+}
+
+PG_FUNCTION_INFO_V1(zcurve_2d_lookup);
+Datum
+zcurve_2d_lookup(PG_FUNCTION_ARGS)
+{
+	/* SRF stuff */
+	FuncCallContext     *funcctx = NULL;
+	int                  call_cntr;
+	int                  max_calls;
+	TupleDesc            tupdesc;
+	AttInMetadata       *attinmeta;
+	p2d_ctx_t 	    *pctx = NULL;
+
+	/* params */
+	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
+  	uint64 x0  = PG_GETARG_INT64(1);
+	uint64 y0  = PG_GETARG_INT64(2);
+	uint64 x1  = PG_GETARG_INT64(3);
+	uint64 y1  = PG_GETARG_INT64(4);
+
+	if (SRF_IS_FIRSTCALL())
+	{
+		MemoryContext   oldcontext;
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		tupdesc = CreateTemplateTupleDesc(2, false);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "x",
+						   INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "y",
+						   INT4OID, -1, 0);
+
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+		funcctx->max_calls = 1000000;
+
+		if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+			ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("function returning record called in context "
+				"that cannot accept type record")));
+
+		attinmeta = TupleDescGetAttInMetadata(tupdesc);
+		funcctx->attinmeta = attinmeta;
+
+		pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
+		p2d_ctx_t_CTOR(pctx, relname, x0, y0, x1, y1);
+		funcctx->user_fctx = pctx;
+
+		MemoryContextSwitchTo(oldcontext);
+	}
+
+	PG_FREE_IF_COPY(relname, 0);
+	funcctx = SRF_PERCALL_SETUP();
+	pctx = (p2d_ctx_t *) funcctx->user_fctx;
+
+	call_cntr = funcctx->call_cntr;
+	max_calls = funcctx->max_calls;
+	attinmeta = funcctx->attinmeta;
+
+
+	/*elog(INFO, "%s height(%d) nattrs(%d)", relname, _bt_getrootheight(relation), RelationGetNumberOfAttributes(relation));*/
+	{
+	        HeapTuple    tuple;
+	        Datum        result;
+		char	    *values[2];
+		uint32 x = 33, y = 44;
+
+		int ret = (0 == pctx->cnt_) ?
+			pointSpatial2d_moveFirst(&pctx->qdef_, &x, &y) :
+			pointSpatial2d_moveNext(&pctx->qdef_, &x, &y);
+		pctx->cnt_++;
+		if (ret)
+		{
+			values[0] = psprintf("%d", (unsigned)x);
+			values[1] = psprintf("%d", (unsigned)y);
+			tuple = BuildTupleFromCStrings(funcctx->attinmeta, values);
+			SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+		}
+		else
+		{
+			p2d_ctx_t_DTOR(pctx);
+		}
+	}
+	SRF_RETURN_DONE(funcctx);
 }
 
 int 

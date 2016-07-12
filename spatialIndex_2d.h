@@ -55,8 +55,8 @@ extern void spt_query2_def_t_DTOR (spt_query2_def_t *ps);
 
 /* BTree2dPointSpatial stuff ------------------------------------------------------------------------------- */
 
-extern int  pointSpatial2d_moveFirst(spt_query2_def_t *q);
-extern int  pointSpatial2d_moveNext(spt_query2_def_t *q);
+extern int  pointSpatial2d_moveFirst(spt_query2_def_t *q, uint32 *x, uint32 * y);
+extern int  pointSpatial2d_moveNext(spt_query2_def_t *q, uint32 *x, uint32 * y);
 
 /*private*/
 extern void pointSpatial2d_closeQuery(spt_query2_def_t *q);
@@ -67,8 +67,8 @@ extern void pointSpatial2d_setSpatialQuery (spt_query2_def_t *q);
 
 extern int  pointSpatial2d_queryFind (spt_query2_def_t *q, uint64 start_val);
 extern int  pointSpatial2d_queryNextKey (spt_query2_def_t *q);
-extern int  pointSpatial2d_findNextMatch (spt_query2_def_t *q);
-extern int  pointSpatial2d_checkKey (spt_query2_def_t *q);
+extern int  pointSpatial2d_findNextMatch (spt_query2_def_t *q, uint32 *x, uint32 * y);
+extern int  pointSpatial2d_checkKey (spt_query2_def_t *q, uint32 *x, uint32 * y);
 extern int  pointSpatial2d_checkNextPage(spt_query2_def_t *q);
     
 

@@ -211,25 +211,25 @@ pointSpatial2d_setSpatialQuery(spt_query2_def_t *q)
 }
 
 int
-pointSpatial2d_moveFirst(spt_query2_def_t *q)
+pointSpatial2d_moveFirst(spt_query2_def_t *q, uint32 *x, uint32 * y)
 {
 	pointSpatial2d_setSpatialQuery (q);
-	return pointSpatial2d_findNextMatch(q);
+	return pointSpatial2d_findNextMatch(q, x, y);
 }
 
 int
-pointSpatial2d_moveNext (spt_query2_def_t *q)
+pointSpatial2d_moveNext (spt_query2_def_t *q, uint32 *x, uint32 * y)
 {
 	/*finished*/
 	if (!zcurve_scan_ctx_is_opened(&q->qctx_))
 		return 0;
 	if (q->subQueryFinished)
-    		return pointSpatial2d_findNextMatch(q);
+    		return pointSpatial2d_findNextMatch(q, x, y);
 
 	if(!pointSpatial2d_checkNextPage(q))
 	{
 		pointSpatial2d_releaseSubQuery(q);
-		return pointSpatial2d_findNextMatch(q);
+		return pointSpatial2d_findNextMatch(q, x, y);
 	}
 
 	if (!pointSpatial2d_queryNextKey(q))
@@ -240,7 +240,7 @@ pointSpatial2d_moveNext (spt_query2_def_t *q)
 
 	while (!(q->currentKey.val_ > q->queryHead->highKey.val_))
 	{
-		if (pointSpatial2d_checkKey(q))
+		if (pointSpatial2d_checkKey(q, x, y))
 			return 1;
 
 		if (!pointSpatial2d_checkNextPage(q))
@@ -253,7 +253,7 @@ pointSpatial2d_moveNext (spt_query2_def_t *q)
 		}
 	}
 	pointSpatial2d_releaseSubQuery(q);
-	return pointSpatial2d_findNextMatch(q);
+	return pointSpatial2d_findNextMatch(q, x, y);
 }
 
 
@@ -273,7 +273,7 @@ pointSpatial2d_checkNextPage(spt_query2_def_t *q)
 
 
 int
-pointSpatial2d_findNextMatch(spt_query2_def_t *q)
+pointSpatial2d_findNextMatch(spt_query2_def_t *q, uint32 *x, uint32 * y)
 {
 	Assert(q);
 	while(q->queryHead)
@@ -327,7 +327,7 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 		/*elog(INFO, "findNextMatch 2(%lx %lx)", q->currentKey.val_, q->lastKey.val_);*/
         	while (q->currentKey.val_ <= q->queryHead->highKey.val_)
 		{
-			if (pointSpatial2d_checkKey(q))
+			if (pointSpatial2d_checkKey(q, x, y))
 				return 1;
 			if (!pointSpatial2d_checkNextPage(q))
 				break;
@@ -344,7 +344,7 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q)
 };
 
 int
-pointSpatial2d_checkKey (spt_query2_def_t *q)
+pointSpatial2d_checkKey (spt_query2_def_t *q, uint32 *x, uint32 * y)
 {
   	uint64 bitMask = 0xAAAAAAAAAAAAAAAAULL;
 	bit2Key_t *lKey = &q->queryHead->lowKey;
@@ -362,11 +362,11 @@ pointSpatial2d_checkKey (spt_query2_def_t *q)
 		if (tmpK > tmpH)
 			return 0;
 	}
-	/*{
-		uint32 x, y;
-		bit2Key_toXY (&q->currentKey, &x, &y);
-		elog(INFO, "\t\tYes: %d %d %lx", x, y, q->currentKey.val_);
-	}*/
+	Assert(x);
+	Assert(y);
+	bit2Key_toXY (&q->currentKey, x, y);
+
+	/*elog(INFO, "\t\tYes: %d %d %lx", x, y, q->currentKey.val_);*/
 	return 1;
 }
 
