@@ -570,12 +570,12 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->cur_val_ = DatumGetInt64(arg);
+		ctx->iptr_ = itup->t_tid;
 
 		itemid = PageGetItemId(page, ctx->max_offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->last_page_val_ = DatumGetInt64(arg);
-		ctx->iptr_ = itup->t_tid;
 
 		_bt_freestack(pstack);
 		pstack = NULL;
@@ -631,12 +631,12 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 				itup = (IndexTuple) PageGetItem(page, itemid);
 				arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 				ctx->cur_val_ = DatumGetInt64(arg);
+				ctx->iptr_ = itup->t_tid;
 
 				itemid = PageGetItemId(page, ctx->max_offset_);
 				itup = (IndexTuple) PageGetItem(page, itemid);
 				arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 				ctx->last_page_val_ = DatumGetInt64(arg);
-				ctx->iptr_ = itup->t_tid;
 
 				_bt_freestack(pstack);
 				pstack = NULL;
