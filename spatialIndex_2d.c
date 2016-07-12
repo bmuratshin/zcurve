@@ -211,25 +211,25 @@ pointSpatial2d_setSpatialQuery(spt_query2_def_t *q)
 }
 
 int
-pointSpatial2d_moveFirst(spt_query2_def_t *q, uint32 *x, uint32 * y)
+pointSpatial2d_moveFirst(spt_query2_def_t *q, uint32 *x, uint32 * y, ItemPointerData *iptr)
 {
 	pointSpatial2d_setSpatialQuery (q);
-	return pointSpatial2d_findNextMatch(q, x, y);
+	return pointSpatial2d_findNextMatch(q, x, y, iptr);
 }
 
 int
-pointSpatial2d_moveNext (spt_query2_def_t *q, uint32 *x, uint32 * y)
+pointSpatial2d_moveNext (spt_query2_def_t *q, uint32 *x, uint32 * y, ItemPointerData *iptr)
 {
 	/*finished*/
 	if (!zcurve_scan_ctx_is_opened(&q->qctx_))
 		return 0;
 	if (q->subQueryFinished)
-    		return pointSpatial2d_findNextMatch(q, x, y);
+    		return pointSpatial2d_findNextMatch(q, x, y, iptr);
 
 	if(!pointSpatial2d_checkNextPage(q))
 	{
 		pointSpatial2d_releaseSubQuery(q);
-		return pointSpatial2d_findNextMatch(q, x, y);
+		return pointSpatial2d_findNextMatch(q, x, y, iptr);
 	}
 
 	if (!pointSpatial2d_queryNextKey(q))
@@ -241,8 +241,10 @@ pointSpatial2d_moveNext (spt_query2_def_t *q, uint32 *x, uint32 * y)
 	while (!(q->currentKey.val_ > q->queryHead->highKey.val_))
 	{
 		if (pointSpatial2d_checkKey(q, x, y))
+		{
+			*iptr = q->iptr_;
 			return 1;
-
+		}
 		if (!pointSpatial2d_checkNextPage(q))
 			break;
 
@@ -253,7 +255,7 @@ pointSpatial2d_moveNext (spt_query2_def_t *q, uint32 *x, uint32 * y)
 		}
 	}
 	pointSpatial2d_releaseSubQuery(q);
-	return pointSpatial2d_findNextMatch(q, x, y);
+	return pointSpatial2d_findNextMatch(q, x, y, iptr);
 }
 
 
@@ -273,7 +275,7 @@ pointSpatial2d_checkNextPage(spt_query2_def_t *q)
 
 
 int
-pointSpatial2d_findNextMatch(spt_query2_def_t *q, uint32 *x, uint32 * y)
+pointSpatial2d_findNextMatch(spt_query2_def_t *q, uint32 *x, uint32 * y, ItemPointerData *iptr)
 {
 	Assert(q);
 	while(q->queryHead)
@@ -328,7 +330,10 @@ pointSpatial2d_findNextMatch(spt_query2_def_t *q, uint32 *x, uint32 * y)
         	while (q->currentKey.val_ <= q->queryHead->highKey.val_)
 		{
 			if (pointSpatial2d_checkKey(q, x, y))
+			{
+				*iptr = q->iptr_;
 				return 1;
+			}
 			if (!pointSpatial2d_checkNextPage(q))
 				break;
 			if (!pointSpatial2d_queryNextKey(q))
@@ -378,6 +383,7 @@ pointSpatial2d_queryFind (spt_query2_def_t *q, uint64 start_val)
 	Assert(q);
 	q->currentKey.val_ = q->qctx_.cur_val_;
 	q->lastKey.val_ = q->qctx_.last_page_val_;
+	q->iptr_ = q->qctx_.iptr_;
 	/*elog(INFO, "Found: %lx %lx %lx", start_val, q->currentKey.val_, q->lastKey.val_);*/
 	return ret;
 }
@@ -388,6 +394,7 @@ pointSpatial2d_queryNextKey (spt_query2_def_t *q)
 	int ret = zcurve_scan_move_next(&q->qctx_);
 	Assert(q);
 	q->currentKey.val_ = q->qctx_.cur_val_;
+	q->iptr_ = q->qctx_.iptr_;
 	return ret;
 }
 

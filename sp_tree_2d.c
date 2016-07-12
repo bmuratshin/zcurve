@@ -16,10 +16,15 @@
 #include "utils/fmgroids.h"
 #include "catalog/namespace.h"
 #include "access/nbtree.h"
+#include "access/htup_details.h"
 #include "storage/bufpage.h"
 
 #include "sp_tree_2d.h"
 #include "spatialIndex_2d.h"
+
+#if PG_VERSION_NUM >= 90600
+#define heap_formtuple heap_form_tuple
+#endif
 
 int32
 zcurve_compare(Relation rel,
@@ -386,15 +391,16 @@ zcurve_2d_count(PG_FUNCTION_ARGS)
 		spt_query2_def_t qdef;
 		int ret = 0;
 		uint32 x, y;
+		ItemPointerData iptr;
 
 		spt_query2_def_t_CTOR (&qdef, relation, x0, y0, x1, y1);
 
-		ret = pointSpatial2d_moveFirst(&qdef, &x, &y);
+		ret = pointSpatial2d_moveFirst(&qdef, &x, &y, &iptr);
 		/*elog(INFO, "moveFirst returns %d", ret);*/
 		while (ret)
 		{
 			cnt++;
-			ret = pointSpatial2d_moveNext(&qdef, &x, &y);
+			ret = pointSpatial2d_moveNext(&qdef, &x, &y, &iptr);
 		}
 		spt_query2_def_t_DTOR (&qdef);
 		/*elog(INFO, "DTOR'ed spt_query2_def_t");*/
@@ -460,11 +466,10 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		MemoryContext   oldcontext;
 		funcctx = SRF_FIRSTCALL_INIT();
 
-		tupdesc = CreateTemplateTupleDesc(2, false);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "x",
-						   INT4OID, -1, 0);
-		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "y",
-						   INT4OID, -1, 0);
+		tupdesc = CreateTemplateTupleDesc(3, false);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "ctid", TIDOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "x", INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "y", INT4OID, -1, 0);
 
 		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
 		funcctx->max_calls = 1000000;
@@ -493,24 +498,34 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 	max_calls = funcctx->max_calls;
 	attinmeta = funcctx->attinmeta;
 
-
-	/*elog(INFO, "%s height(%d) nattrs(%d)", relname, _bt_getrootheight(relation), RelationGetNumberOfAttributes(relation));*/
 	{
-	        HeapTuple    tuple;
-	        Datum        result;
-		char	    *values[2];
-		uint32 x = 33, y = 44;
 
-		int ret = (0 == pctx->cnt_) ?
-			pointSpatial2d_moveFirst(&pctx->qdef_, &x, &y) :
-			pointSpatial2d_moveNext(&pctx->qdef_, &x, &y);
+		Datum		datums[3];
+		bool		nulls[3];
+	        HeapTuple    	htuple;
+	        Datum        	result;
+		int ret;
+		uint32 x, y;
+		ItemPointerData iptr;
+		memset(&iptr, 0, sizeof(iptr));
+
+		ret = (0 == pctx->cnt_) ?
+			pointSpatial2d_moveFirst(&pctx->qdef_, &x, &y, &iptr) :
+			pointSpatial2d_moveNext(&pctx->qdef_, &x, &y, &iptr);
 		pctx->cnt_++;
 		if (ret)
 		{
-			values[0] = psprintf("%d", (unsigned)x);
-			values[1] = psprintf("%d", (unsigned)y);
-			tuple = BuildTupleFromCStrings(funcctx->attinmeta, values);
-			SRF_RETURN_NEXT(funcctx, HeapTupleGetDatum(tuple));
+			datums[0] = PointerGetDatum(&iptr);
+			datums[1] = Int32GetDatum(x);
+			datums[2] = Int32GetDatum(y);
+
+			nulls[0] = false;
+			nulls[1] = false;
+			nulls[2] = false;
+
+			htuple = heap_formtuple(attinmeta->tupdesc, datums, nulls);
+			result = TupleGetDatum(funcctx, htuple);
+			SRF_RETURN_NEXT(funcctx, result);
 		}
 		else
 		{
@@ -560,6 +575,7 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->last_page_val_ = DatumGetInt64(arg);
+		ctx->iptr_ = itup->t_tid;
 
 		_bt_freestack(pstack);
 		pstack = NULL;
@@ -620,6 +636,7 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 				itup = (IndexTuple) PageGetItem(page, itemid);
 				arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 				ctx->last_page_val_ = DatumGetInt64(arg);
+				ctx->iptr_ = itup->t_tid;
 
 				_bt_freestack(pstack);
 				pstack = NULL;
@@ -660,6 +677,7 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->cur_val_ = DatumGetInt64(arg);
+		ctx->iptr_ = itup->t_tid;
 /*		elog(INFO, "zcurve_scan_move_next (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
 		return 1;
 	}

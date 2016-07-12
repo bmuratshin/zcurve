@@ -25,6 +25,7 @@ struct zcurve_scan_ctx_s {
 
 	uint64		cur_val_;	
 	uint64		last_page_val_;	
+	ItemPointerData iptr_;
 };
 typedef struct zcurve_scan_ctx_s zcurve_scan_ctx_t;
 
