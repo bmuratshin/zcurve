@@ -8,6 +8,6 @@ BEGIN{
 #    print "select zcurve_oids_by_extent_ii("x","y","x+1000","y+1000") as count;";
 #    print "select count(1) from test_points where point(x,y) <@ box(point("x","y"),point("x+1000","y+1000"));";
 #    print "select "i";";
-    print "select count(1) from zcurve_2d_lookup('zcurve_test_points', "x","y","x+1000","y+1000") as foo(z tid, x int, y int);";
+    print "select count(1) from zcurve_2d_lookup('zcurve_test_points', "x","y","x+1000","y+1000");";
   }
 }

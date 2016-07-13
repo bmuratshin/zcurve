@@ -21,6 +21,8 @@
 
 #include "sp_tree_2d.h"
 #include "spatialIndex_2d.h"
+#include "gen_list.h"
+#include "list_sort.h"
 
 #if PG_VERSION_NUM >= 90600
 #define heap_formtuple heap_form_tuple
@@ -412,10 +414,38 @@ zcurve_2d_count(PG_FUNCTION_ARGS)
    	PG_RETURN_INT64(cnt);
 }
 
+struct res_item_s {
+	ItemPointerData iptr_;
+	uint32		x_;
+	uint32		y_;
+	gen_list_t	link_;
+};
+typedef struct res_item_s res_item_t;
+
+static int  
+res_item_compare_proc(const void *a, const void *b, const void *arg)
+{
+	const res_item_t *l = (const res_item_t *)a;
+	const res_item_t *r = (const res_item_t *)b;
+
+	if (l->iptr_.ip_blkid.bi_hi != r->iptr_.ip_blkid.bi_hi)
+		return l->iptr_.ip_blkid.bi_hi - r->iptr_.ip_blkid.bi_hi;
+
+	if (l->iptr_.ip_blkid.bi_lo != r->iptr_.ip_blkid.bi_lo)
+		return l->iptr_.ip_blkid.bi_lo - r->iptr_.ip_blkid.bi_lo;
+
+	if (l->iptr_.ip_posid != r->iptr_.ip_posid)
+		return l->iptr_.ip_posid - r->iptr_.ip_posid;
+
+	return 0;
+}
+
 struct p2d_ctx_s {
-	Relation    relation_;
-	spt_query2_def_t qdef_;
-	int cnt_;
+	Relation    		relation_;
+	spt_query2_def_t 	qdef_;
+	gen_list_t 		*result_;
+	gen_list_t 		*cur_;
+	int 			cnt_;
 };
 typedef struct p2d_ctx_s p2d_ctx_t;
 void p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64 x1, uint64 y1);
@@ -432,6 +462,8 @@ void p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, u
 	relvar = makeRangeVarFromNameList(relname_list);
 	ptr->relation_ = indexOpen(relvar);
 	ptr->cnt_ = 0;
+	ptr->result_ = NULL;
+	ptr->cur_ = NULL;
 	spt_query2_def_t_CTOR (&ptr->qdef_, ptr->relation_, x0, y0, x1, y1);
 }
 
@@ -439,8 +471,12 @@ void p2d_ctx_t_DTOR(p2d_ctx_t *ptr)
 {
 	Assert(ptr);
 	indexClose(ptr->relation_);
+	ptr->relation_ = NULL;
+	ptr->result_ = NULL;
+	ptr->cur_ = NULL;
 	spt_query2_def_t_DTOR (&ptr->qdef_);
 }
+
 
 PG_FUNCTION_INFO_V1(zcurve_2d_lookup);
 Datum
@@ -483,9 +519,32 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		attinmeta = TupleDescGetAttInMetadata(tupdesc);
 		funcctx->attinmeta = attinmeta;
 
-		pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
-		p2d_ctx_t_CTOR(pctx, relname, x0, y0, x1, y1);
-		funcctx->user_fctx = pctx;
+		{
+			int 		ret;
+			uint32 		x, y;
+			ItemPointerData iptr;
+
+			pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
+			p2d_ctx_t_CTOR(pctx, relname, x0, y0, x1, y1);
+			funcctx->user_fctx = pctx;
+
+			ret = pointSpatial2d_moveFirst(&pctx->qdef_, &x, &y, &iptr);
+			while (ret)
+			{
+				res_item_t *pit = (res_item_t *)palloc(sizeof(res_item_t));
+				pit->x_ = x;
+				pit->y_ = y;
+				pit->iptr_ = iptr;
+				pit->link_.data = pit;
+				pit->link_.next = pctx->result_;
+				pctx->result_ = &pit->link_;
+
+				pctx->cnt_++;
+				ret = pointSpatial2d_moveNext(&pctx->qdef_, &x, &y, &iptr);
+			}
+			pctx->result_ = list_sort (pctx->result_,  res_item_compare_proc, NULL);
+			pctx->cur_ = pctx->result_;
+		}
 
 		MemoryContextSwitchTo(oldcontext);
 	}
@@ -499,25 +558,18 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 	attinmeta = funcctx->attinmeta;
 
 	{
-
 		Datum		datums[3];
 		bool		nulls[3];
 	        HeapTuple    	htuple;
 	        Datum        	result;
-		int ret;
-		uint32 x, y;
-		ItemPointerData iptr;
-		memset(&iptr, 0, sizeof(iptr));
 
-		ret = (0 == pctx->cnt_) ?
-			pointSpatial2d_moveFirst(&pctx->qdef_, &x, &y, &iptr) :
-			pointSpatial2d_moveNext(&pctx->qdef_, &x, &y, &iptr);
-		pctx->cnt_++;
-		if (ret)
+		if (pctx->cur_)
 		{
-			datums[0] = PointerGetDatum(&iptr);
-			datums[1] = Int32GetDatum(x);
-			datums[2] = Int32GetDatum(y);
+			res_item_t	*pit = (res_item_t *)(pctx->cur_->data);
+			datums[0] = PointerGetDatum(&pit->iptr_);
+			datums[1] = Int32GetDatum(pit->x_);
+			datums[2] = Int32GetDatum(pit->y_);
+			pctx->cur_ = pctx->cur_->next;
 
 			nulls[0] = false;
 			nulls[1] = false;
@@ -530,35 +582,110 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		else
 		{
 			p2d_ctx_t_DTOR(pctx);
-		}
+		}	
 	}
+	pfree(pctx);
 	SRF_RETURN_DONE(funcctx);
+}
+
+static int 
+zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx)
+{
+	Page 		page;
+	BTStack		stack = ctx->pstack_;
+	ItemId		itemid;
+	IndexTuple	itup;
+	Datum		arg;
+	bool		null;
+
+	/*elog(INFO, "zcurve_scan_step_forward (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
+	int 	ilevel = 0;
+	for (;;)
+	{
+		BTPageOpaque opaque;
+		OffsetNumber mx = 0;
+		ilevel++;
+		/*elog(INFO, "level(%d) blkno(%d) offset(%d)", ilevel - 1, stack->bts_blkno, stack->bts_offset);*/
+		/* drop the read lock on the parent page, acquire one on the child */
+		ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, stack->bts_blkno, BT_READ);
+		page = BufferGetPage(ctx->buf_);
+		mx = PageGetMaxOffsetNumber(page);
+		/*elog(INFO, "max=(%d)", mx);*/
+		if (stack->bts_offset < mx)
+		{
+			BlockNumber  blkno;
+			int i;
+			{
+				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+				itemid = PageGetItemId(page, stack->bts_offset + 1);
+				itup = (IndexTuple) PageGetItem(page, itemid);
+				blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
+				/*elog (INFO, "BLKNO=%d", blkno);*/
+				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
+				page = BufferGetPage(ctx->buf_);
+				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+				ctx->offset_ = P_FIRSTDATAKEY(opaque);
+			}
+			for (i = 0; i < ilevel - 1; i++)
+			{
+				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+				ctx->offset_ = P_FIRSTDATAKEY(opaque);
+				itemid = PageGetItemId(page, ctx->offset_);
+				itup = (IndexTuple) PageGetItem(page, itemid);
+				blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
+				/*elog (INFO, "BLKNO=%d", blkno);*/
+				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
+				page = BufferGetPage(ctx->buf_);
+			}
+			ctx->max_offset_ = PageGetMaxOffsetNumber(page);
+			itemid = PageGetItemId(page, ctx->offset_);
+			itup = (IndexTuple) PageGetItem(page, itemid);
+			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+			ctx->cur_val_ = DatumGetInt64(arg);
+			ctx->iptr_ = itup->t_tid;
+
+			itemid = PageGetItemId(page, ctx->max_offset_);
+			itup = (IndexTuple) PageGetItem(page, itemid);
+			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+			ctx->last_page_val_ = DatumGetInt64(arg);
+
+			/*elog(INFO, "zcurve_scan_step_forward (EOF)(%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
+			return 1;
+		}
+
+		if (stack->bts_parent == NULL)
+			break;
+
+		stack = stack->bts_parent;
+	}
+  return 0;
 }
 
 int 
 zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 {
-	BTStack	pstack = NULL, stack = NULL;
 	bool 	nextkey = 0;
 	Page 	page;
-	int 	ilevel = 0;
 
 	ItemId		itemid;
 	IndexTuple	itup;
 	Datum		arg;
 	bool		null;
 
-	/*elog(INFO, "zcurve_scan_move_first(%lx)", start_val);*/
-
+	/*elog(INFO, "zcurve_scan_move_first(%lx %p %d)", start_val, ctx->pstack_, (int)ctx->buf_);*/
 
 	if (ctx->buf_)
 		_bt_relbuf(ctx->rel_, ctx->buf_);
 
+
 	ctx->init_zv_ = start_val;
 	ctx->skey_.sk_argument = Int64GetDatum(start_val);
 
-	pstack = zcurve_search(ctx->rel_, 1, &ctx->skey_, nextkey,  &ctx->buf_, BT_READ);
-	if (NULL == pstack)
+	if (ctx->pstack_)
+		_bt_freestack(ctx->pstack_);
+
+	ctx->pstack_ = zcurve_search(ctx->rel_, 1, &ctx->skey_, nextkey,  &ctx->buf_, BT_READ);
+	if (NULL == ctx->pstack_)
 		return 0;
 
 	ctx->offset_ = zcurve_binsrch(ctx->rel_, ctx->buf_, 1, &ctx->skey_, nextkey);
@@ -577,83 +704,15 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->last_page_val_ = DatumGetInt64(arg);
 
-		_bt_freestack(pstack);
-		pstack = NULL;
+		/*trace_page_2d(ctx->rel_, &ctx->skey_, page);*/
 
-		/*elog(INFO, "zcurve_scan_move_first (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
+		/*elog(INFO, "zcurve_scan_move_first (%lx -> %lx)[%d %d]{%p}", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_, ctx->pstack_);*/
 		return 1;
 	}
 	else
 	{
-		ilevel = 0;
-		stack = pstack;
-		for (;;)
-		{
-			BTPageOpaque opaque;
-			OffsetNumber mx = 0;
-			ilevel++;
-
-			/*elog(INFO, "level(%d) blkno(%d) offset(%d)", ilevel - 1, stack->bts_blkno, stack->bts_offset);*/
-
-			/* drop the read lock on the parent page, acquire one on the child */
-			ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, stack->bts_blkno, BT_READ);
-			page = BufferGetPage(ctx->buf_);
-			mx = PageGetMaxOffsetNumber(page);
-			/*elog(INFO, "max=(%d)", mx);*/
-			if (stack->bts_offset < mx)
-			{
-				BlockNumber  blkno;
-				int i;
-				{
-					opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-					itemid = PageGetItemId(page, stack->bts_offset + 1);
-					itup = (IndexTuple) PageGetItem(page, itemid);
-					blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
-					/*elog (INFO, "BLKNO=%d", blkno);*/
-					ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
-					page = BufferGetPage(ctx->buf_);
-					opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-					ctx->offset_ = P_FIRSTDATAKEY(opaque);
-				}
-				for (i = 0; i < ilevel - 1; i++)
-				{
-					opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-					ctx->offset_ = P_FIRSTDATAKEY(opaque);
-					itemid = PageGetItemId(page, ctx->offset_);
-					itup = (IndexTuple) PageGetItem(page, itemid);
-					blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
-					/*elog (INFO, "BLKNO=%d", blkno);*/
-					ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
-					page = BufferGetPage(ctx->buf_);
-				}
-				ctx->max_offset_ = PageGetMaxOffsetNumber(page);
-				itemid = PageGetItemId(page, ctx->offset_);
-				itup = (IndexTuple) PageGetItem(page, itemid);
-				arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-				ctx->cur_val_ = DatumGetInt64(arg);
-				ctx->iptr_ = itup->t_tid;
-
-				itemid = PageGetItemId(page, ctx->max_offset_);
-				itup = (IndexTuple) PageGetItem(page, itemid);
-				arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-				ctx->last_page_val_ = DatumGetInt64(arg);
-
-				_bt_freestack(pstack);
-				pstack = NULL;
-
-				/*elog(INFO, "zcurve_scan_move_first (EOF)(%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
-				return 1;
-			}
-
-			if (stack->bts_parent == NULL)
-				break;
-
-			stack = stack->bts_parent;
-		}
+		return zcurve_scan_step_forward(ctx);
 	}
-
-	if (pstack)
-		_bt_freestack(pstack);
 	/*elog(INFO, "zcurve_scan_move_first (EOF)[%d %d]", ctx->offset_, ctx->max_offset_);*/
 	return 0;
 }
@@ -665,7 +724,7 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 	/*elog(INFO, "zcurve_scan_move_next");*/
 	if (ctx->offset_ < ctx->max_offset_)
 	{
-		Page 	page;
+		Page 		page;
 		ItemId		itemid;
 		IndexTuple	itup;
 		Datum		arg;
@@ -678,11 +737,12 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->cur_val_ = DatumGetInt64(arg);
 		ctx->iptr_ = itup->t_tid;
-/*		elog(INFO, "zcurve_scan_move_next (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
+		/*elog(INFO, "zcurve_scan_move_next (%lx -> %lx)[%d %d]{%p}", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_, ctx->pstack_);*/
 		return 1;
 	}
 	/*elog(INFO, "zcurve_scan_move_next OOPS");*/
-	return 0;
+	return zcurve_scan_step_forward(ctx);
+;
 }
 
 int 
@@ -697,6 +757,7 @@ zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, uint64 start_val)
 	ctx->cur_val_ = 0;
 	ctx->last_page_val_ = 0;
 	ctx->buf_ = 0;
+	ctx->pstack_ = NULL;
 	/*elog(INFO, "zcurve_scan_ctx_CTOR(%ld)", sizeof(ctx->buf_));*/
 	return 1;
 }
@@ -713,6 +774,13 @@ zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx)
 		/*elog(INFO, "zcurve_scan_ctx_DTOR");*/
 		return 0;
 	}
+
+	if (ctx->pstack_)
+	{
+		_bt_freestack(ctx->pstack_);
+		ctx->pstack_ = NULL;
+	}
+
 	return -1;
 }
 

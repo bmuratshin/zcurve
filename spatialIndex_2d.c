@@ -371,7 +371,7 @@ pointSpatial2d_checkKey (spt_query2_def_t *q, uint32 *x, uint32 * y)
 	Assert(y);
 	bit2Key_toXY (&q->currentKey, x, y);
 
-	/*elog(INFO, "\t\tYes: %d %d %lx", x, y, q->currentKey.val_);*/
+	/*elog(INFO, "\t\tYes: %d %d %lx", *x, *y, q->currentKey.val_);*/
 	return 1;
 }
 
@@ -394,6 +394,7 @@ pointSpatial2d_queryNextKey (spt_query2_def_t *q)
 	int ret = zcurve_scan_move_next(&q->qctx_);
 	Assert(q);
 	q->currentKey.val_ = q->qctx_.cur_val_;
+	q->lastKey.val_ = q->qctx_.last_page_val_;
 	q->iptr_ = q->qctx_.iptr_;
 	return ret;
 }

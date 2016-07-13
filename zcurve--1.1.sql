@@ -27,8 +27,9 @@ RETURNS bigint
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE TYPE __ret_2d_lookup AS (c_tid TID, x integer, y integer);
 CREATE FUNCTION zcurve_2d_lookup(text, bigint, bigint, bigint, bigint)
-RETURNS SETOF record
+RETURNS SETOF __ret_2d_lookup
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE STRICT;
 
