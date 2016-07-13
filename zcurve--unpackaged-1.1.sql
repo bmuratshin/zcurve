@@ -7,4 +7,5 @@ ALTER EXTENSION zcurve ADD domain zcurve;
 ALTER EXTENSION zcurve ADD function zcurve_val_from_xy(bigint, bigint);
 ALTER EXTENSION zcurve ADD function zcurve_oids_by_extent(bigint, bigint, bigint, bigint);
 ALTER EXTENSION zcurve ADD function zcurve_oids_by_extent_ii(bigint, bigint, bigint, bigint);
+ALTER EXTENSION zcurve ADD FUNCTION zcurve_2d_count(text, bigint, bigint, bigint, bigint);
 ALTER EXTENSION zcurve ADD FUNCTION zcurve_2d_lookup(text, bigint, bigint, bigint, bigint);

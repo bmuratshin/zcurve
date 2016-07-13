@@ -22,8 +22,13 @@ RETURNS bigint
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE STRICT;
 
-CREATE FUNCTION zcurve_2d_lookup(text, bigint, bigint, bigint, bigint)
+CREATE FUNCTION zcurve_2d_count(text, bigint, bigint, bigint, bigint)
 RETURNS bigint
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION zcurve_2d_lookup(text, bigint, bigint, bigint, bigint)
+RETURNS SETOF record
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE STRICT;
 
