@@ -131,7 +131,7 @@ spt_query2_def_t_CTOR (spt_query2_def_t *ps, Relation rel, uint32 minx, uint32 m
 	ps->minY_ = miny;
 	ps->maxX_ = maxx;
 	ps->maxY_ = maxy;
-	mp_CTOR(&ps->memAlloc);
+	/*mp_CTOR(&ps->memAlloc);*/
 	zcurve_scan_ctx_CTOR(&ps->qctx_, rel, 0);
 }
 
@@ -140,7 +140,7 @@ spt_query2_def_t_DTOR (spt_query2_def_t *ps)
 {
 	Assert(NULL != ps);
 	zcurve_scan_ctx_DTOR(&ps->qctx_);
-	mp_DTOR(&ps->memAlloc);
+	/*mp_DTOR(&ps->memAlloc);*/
 }
 
 
@@ -154,7 +154,7 @@ pointSpatial2d_createQuery(spt_query2_def_t *q)
 		q->freeHead = q->freeHead->prevQuery;
 		return retval;
 	}
-	return (spatial2Query_t *)mp_alloc (&(q->memAlloc), sizeof(spatial2Query_t));
+	return (spatial2Query_t *)palloc(sizeof(spatial2Query_t));/*mp_alloc (&(q->memAlloc), sizeof(spatial2Query_t));*/
 }
 
 void 
@@ -172,7 +172,7 @@ pointSpatial2d_closeQuery(spt_query2_def_t *q)
 	if (zcurve_scan_ctx_is_opened(&q->qctx_))
 	{
 		q->queryHead = q->freeHead = NULL;
-		mp_reset(&q->memAlloc);
+		/*mp_reset(&q->memAlloc);*/
 		zcurve_scan_ctx_DTOR(&q->qctx_);
 	}
 }
@@ -238,7 +238,8 @@ pointSpatial2d_moveNext (spt_query2_def_t *q, uint32 *x, uint32 * y, ItemPointer
 		return 0;
 	}
 
-	while (!(q->currentKey.val_ > q->queryHead->highKey.val_))
+	/*elog(INFO, "moveNext (%lx %lx %lx)", q->currentKey.val_, q->lastKey.val_, q->queryHead->highKey.val_);*/
+	while (q->currentKey.val_ <= q->queryHead->highKey.val_)
 	{
 		if (pointSpatial2d_checkKey(q, x, y))
 		{
@@ -250,9 +251,11 @@ pointSpatial2d_moveNext (spt_query2_def_t *q, uint32 *x, uint32 * y, ItemPointer
 
 		if (!pointSpatial2d_queryNextKey(q))
 		{
+			/*elog(INFO, "moveNext closeQuery(%lx %lx %lx)", q->currentKey.val_, q->lastKey.val_, q->queryHead->highKey.val_);*/
 			pointSpatial2d_closeQuery(q);
 			return 0;
 		}
+		/*elog(INFO, "moveNext 2(%lx %lx %lx)", q->currentKey.val_, q->lastKey.val_, q->queryHead->highKey.val_);*/
 	}
 	pointSpatial2d_releaseSubQuery(q);
 	return pointSpatial2d_findNextMatch(q, x, y, iptr);
@@ -264,13 +267,14 @@ pointSpatial2d_checkNextPage(spt_query2_def_t *q)
 {
 	if (q->qctx_.offset_ == q->qctx_.max_offset_)
 	{
-		if (!zcurve_scan_move_next(&q->qctx_))
+		if (!zcurve_scan_try_move_next(&q->qctx_, q->queryHead->highKey.val_))
 			return 0;
 		if (q->qctx_.cur_val_ > q->queryHead->highKey.val_)
 			return 0;
+		/*elog(INFO, "checkNextPage (%lx %lx)", q->qctx_.cur_val_, q->queryHead->highKey.val_);*/
 		return 1;
 	}
-	return true;
+	return 1;
 }
 
 
@@ -396,6 +400,7 @@ pointSpatial2d_queryNextKey (spt_query2_def_t *q)
 	q->currentKey.val_ = q->qctx_.cur_val_;
 	q->lastKey.val_ = q->qctx_.last_page_val_;
 	q->iptr_ = q->qctx_.iptr_;
+	/*elog(INFO, "queryNextKey: %lx %lx", q->currentKey.val_, q->lastKey.val_);*/
 	return ret;
 }
 

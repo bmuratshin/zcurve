@@ -33,6 +33,7 @@ typedef struct zcurve_scan_ctx_s zcurve_scan_ctx_t;
 
 extern int zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val);
 extern int zcurve_scan_move_next(zcurve_scan_ctx_t *ctx);
+extern int zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, uint64 check_val);
 extern int zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, uint64 start_val);
 extern int zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx);
 extern int zcurve_scan_ctx_is_opened(zcurve_scan_ctx_t *ctx);

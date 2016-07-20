@@ -1,7 +1,6 @@
 #ifndef __SPATIAL_INDEX_2D_H
 #define __SPATIAL_INDEX_2D_H
 
-#include "mempool.h"
 #include "sp_tree_2d.h"
 
 /* bit2Key stuff ------------------------------------------------------------------------------- */
@@ -33,7 +32,7 @@ typedef struct spatial2Query_s spatial2Query_t;
 struct spt_query2_def_s {
 	uint32 minX_, minY_, maxX_, maxY_;
 
-	mem_pool_t memAlloc;
+	/*mem_pool_t memAlloc;*/
 
 	spatial2Query_t *queryHead;
 	spatial2Query_t *freeHead;

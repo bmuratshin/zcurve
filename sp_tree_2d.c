@@ -28,6 +28,7 @@
 #define heap_formtuple heap_form_tuple
 #endif
 
+
 int32
 zcurve_compare(Relation rel,
 			int keysz,
@@ -589,7 +590,7 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 }
 
 static int 
-zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx)
+zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 {
 	Page 		page;
 	BTStack		stack = ctx->pstack_;
@@ -598,6 +599,18 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx)
 	Datum		arg;
 	bool		null;
 
+	BlockNumber	old_block_num = (ctx->buf_) ? BufferGetBlockNumber(ctx->buf_) : 0;
+	BlockNumber	new_block_num = 0;
+
+	OffsetNumber	old_offset = ctx->offset_;
+	OffsetNumber	old_max_offset = ctx->max_offset_;
+
+	uint64		old_cur_val = ctx->cur_val_;
+	uint64		old_last_page_val = ctx->last_page_val_;
+
+	ItemPointerData old_iptr = ctx->iptr_;
+
+
 	/*elog(INFO, "zcurve_scan_step_forward (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
 	int 	ilevel = 0;
 	for (;;)
@@ -605,9 +618,11 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx)
 		BTPageOpaque opaque;
 		OffsetNumber mx = 0;
 		ilevel++;
+
 		/*elog(INFO, "level(%d) blkno(%d) offset(%d)", ilevel - 1, stack->bts_blkno, stack->bts_offset);*/
 		/* drop the read lock on the parent page, acquire one on the child */
 		ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, stack->bts_blkno, BT_READ);
+		new_block_num = stack->bts_blkno;
 		page = BufferGetPage(ctx->buf_);
 		mx = PageGetMaxOffsetNumber(page);
 		/*elog(INFO, "max=(%d)", mx);*/
@@ -622,6 +637,8 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx)
 				blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
 				/*elog (INFO, "BLKNO=%d", blkno);*/
 				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
+				new_block_num = blkno;
+
 				page = BufferGetPage(ctx->buf_);
 				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 				ctx->offset_ = P_FIRSTDATAKEY(opaque);
@@ -633,7 +650,9 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx)
 				itemid = PageGetItemId(page, ctx->offset_);
 				itup = (IndexTuple) PageGetItem(page, itemid);
 				blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
+
 				/*elog (INFO, "BLKNO=%d", blkno);*/
+				new_block_num = blkno;
 				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
 				page = BufferGetPage(ctx->buf_);
 			}
@@ -649,6 +668,17 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx)
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 			ctx->last_page_val_ = DatumGetInt64(arg);
 
+			if (preserve_position && old_block_num && old_block_num != new_block_num)
+			{
+				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, old_block_num, BT_READ);
+
+				ctx->offset_ = old_offset;
+				ctx->max_offset_ = old_max_offset;
+
+				ctx->cur_val_ = old_cur_val;
+				ctx->last_page_val_ = old_last_page_val;
+				ctx->iptr_ = old_iptr;
+			}
 			/*elog(INFO, "zcurve_scan_step_forward (EOF)(%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
 			return 1;
 		}
@@ -711,7 +741,7 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 	}
 	else
 	{
-		return zcurve_scan_step_forward(ctx);
+		return zcurve_scan_step_forward(ctx, false);
 	}
 	/*elog(INFO, "zcurve_scan_move_first (EOF)[%d %d]", ctx->offset_, ctx->max_offset_);*/
 	return 0;
@@ -741,8 +771,25 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 		return 1;
 	}
 	/*elog(INFO, "zcurve_scan_move_next OOPS");*/
-	return zcurve_scan_step_forward(ctx);
-;
+	return zcurve_scan_step_forward(ctx, false);
+}
+
+int 
+zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, uint64 check_val)
+{
+	if (ctx->offset_ < ctx->max_offset_)
+	{
+		return 1;
+	}
+
+	/*elog(INFO, "zcurve_scan_try_move_next(%lx)\t\tOOPS", check_val);*/
+	if (zcurve_scan_step_forward(ctx, true))
+	{
+		int ret = (ctx->cur_val_ <= check_val) ? 1 : 0;
+		/*elog(INFO, "zcurve_scan_try_move_next (%lx -> %lx)[%d %d]{%d}", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_, ret);*/
+		return ret;
+	}
+	return 0;
 }
 
 int 
