@@ -1,93 +1,114 @@
+/*
+ * contrib/zcurve/list_sort.c
+ *
+ *
+ * list_sort.c -- a kind of mergesort for a generic list 
+ *		
+ *
+ * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
+ */
 #include "postgres.h"
 #include "list_sort.h"
 
 static gen_list_t *
-IntersectSorted(
-  gen_list_t *pList1, 
-  gen_list_t *pList2,
-  int (* compare_proc)(const void *, const void *, const void *), 
-  const void *arg)
+intersect_sorted(
+	gen_list_t * plist1,
+	gen_list_t * plist2,
+	int (*compare_proc) (const void *, const void *, const void *), 
+	const void *arg)
 {
-  gen_list_t *pCurItem, *res;
-  gen_list_t *p1, *p2;
-  int cmp = 0;
-  
-  p1 = pList1;
-  p2 = pList2;
+	gen_list_t *pcur_item, *res;
+	gen_list_t *p1, *p2;
+	int cmp = 0;
 
-  cmp = compare_proc (p1->data, p2->data, arg);
-  if (cmp < 0)
-    {
-      pCurItem = p1;
-      p1 = p1->next;
-    }
-  else 
-    {
-      pCurItem = p2;
-      p2 = p2->next;
-    }
-  res = pCurItem;
-  while (NULL != p1 && NULL != p2) 
-    {
-      cmp = compare_proc (p1->data, p2->data, arg);
-      if (cmp < 0)
-        {
-          pCurItem->next = p1;
-          pCurItem = p1;
-          p1 = p1->next;
-        }
-      else 
-        {
-          pCurItem->next = p2;
-          pCurItem = p2;
-          p2 = p2->next;
-        }
-    }
-  pCurItem->next = (p1)? p1 : p2;
-  return res;
+	p1 = plist1;
+	p2 = plist2;
+
+	cmp = compare_proc (p1->data, p2->data, arg);
+	if (cmp < 0)
+	{
+		pcur_item = p1;
+		p1 = p1->next;
+	}
+	else
+	{
+		pcur_item = p2;
+		p2 = p2->next;
+	}
+	res = pcur_item;
+	while (NULL != p1 && NULL != p2)
+	{
+		cmp = compare_proc (p1->data, p2->data, arg);
+		if (cmp < 0)
+		{
+			pcur_item->next = p1;
+			pcur_item = p1;
+			p1 = p1->next;
+		}
+		else
+		{
+			pcur_item->next = p2;
+			pcur_item = p2;
+			p2 = p2->next;
+		}
+	}
+	pcur_item->next = (p1) ? p1 : p2;
+	return res;
 }
 
-struct   SortStackItem {
-    int		Level;
-    gen_list_t *Item;
-};
+typedef struct sort_stack_item_s
+{
+	int level_;
+	gen_list_t *item_;
+} sort_stack_item_t;
 
 
 #define MAX_SORT_STACK 32
 gen_list_t *
 list_sort (
-  gen_list_t *List,
-  int (* compare_proc)(const void *, const void *, const void *), 
-  const void *arg  )
+	gen_list_t * list,
+	int (*compare_proc) (const void *, const void *, const void *),
+	const void *arg)
 {
-  struct SortStackItem Stack[MAX_SORT_STACK];
-  int StackPos = 0;
-  gen_list_t *p = List;
-  
-  while (NULL != p)
-  {
-    Stack[StackPos].Level = 1;
-    Stack[StackPos].Item = p;
-    p = p->next;
-    Stack[StackPos].Item->next = NULL;
-    StackPos++;
-    Assert (StackPos<MAX_SORT_STACK);
-    while (StackPos > 1 && Stack[StackPos - 1].Level == Stack[StackPos - 2].Level) 
-    {
-      Stack[StackPos - 2].Item = IntersectSorted(Stack[StackPos - 2].Item, Stack[StackPos - 1].Item, compare_proc, arg);
-      Stack[StackPos - 2].Level++;
-      StackPos--;
-      Assert (StackPos>=0);
-    }
-  }
-  while (StackPos > 1)
-  {
-    Stack[StackPos - 2].Item = IntersectSorted(Stack[StackPos - 2].Item, Stack[StackPos - 1].Item, compare_proc, arg);
-    Stack[StackPos - 2].Level++;
-    StackPos--;
-    Assert (StackPos>=0);
-  }
-  if (StackPos > 0)
-    List = Stack[0].Item;
-  return List;
+	sort_stack_item_t stack[MAX_SORT_STACK];
+	int stack_pos = 0;
+	gen_list_t *p = list;
+
+	while (NULL != p)
+	{
+		stack[stack_pos].level_ = 1;
+		stack[stack_pos].item_ = p;
+		p = p->next;
+		stack[stack_pos].item_->next = NULL;
+		stack_pos++;
+		Assert (stack_pos < MAX_SORT_STACK);
+		while (stack_pos > 1
+			&& stack[stack_pos - 1].level_ == stack[stack_pos - 2].level_)
+		{
+			stack[stack_pos - 2].item_ =
+				intersect_sorted(
+					stack[stack_pos - 2].item_,
+					stack[stack_pos - 1].item_, 
+					compare_proc, 
+					arg);
+			stack[stack_pos - 2].level_++;
+			stack_pos--;
+			Assert (stack_pos >= 0);
+		}
+	}
+	while (stack_pos > 1)
+	{
+		stack[stack_pos - 2].item_ =
+			intersect_sorted(
+				stack[stack_pos - 2].item_, 
+				stack[stack_pos - 1].item_,
+				compare_proc, 
+				arg);
+		stack[stack_pos - 2].level_++;
+		stack_pos--;
+		Assert(stack_pos >= 0);
+	}
+	if (stack_pos > 0)
+		list = stack[0].item_;
+	return list;
 }

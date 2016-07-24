@@ -1,41 +1,75 @@
-#ifndef __SP_TREE_2D_H
-#define __SP_TREE_2D_H
-
-
 /*
- *	PostgreSQL definitions for ZCurve traits
+ * contrib/zcurve/sp_tree_2d.h
  *
- *	contrib/zcurve/zcurve.c
  *
+ * sp_tree_2d.h -- low level operations with numbers and 2D ZCurve index realized as a regular btree
+ *		
+ *
+ * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
  */
+#ifndef __ZCURVE_SP_TREE_2D_H
+#define __ZCURVE_SP_TREE_2D_H
+
+
+/* converts coordinates to z-value*/
 extern uint64 zcurve_fromXY (uint32 ix, uint32 iy);
+
+/* splits z-value back to coordinates */
 extern void zcurve_toXY (uint64 al, uint32 *px, uint32 *py);
 
-extern BTStack zcurve_search(Relation rel, int keysz, ScanKey scankey, bool nextkey, Buffer *bufP, int access);
-extern OffsetNumber zcurve_binsrch(Relation rel, Buffer buf, int keysz, ScanKey scankey, bool nextkey);
-extern int32 zcurve_compare(Relation rel, int keysz, ScanKey scankey, Page page, OffsetNumber offnum);
+/* the definition struct for zcurve subqery cursor */
+typedef struct zcurve_scan_ctx_s {
+	Relation 	rel_;		/* index tree */
+	uint64		init_zv_;       /* start value for lookup */
+	Buffer		buf_;		/* currentle holded buffer (don't forget to call zcurve_scan_ctx_DTOR) */
+	OffsetNumber	offset_;	/* cursor position in the holded page */
+	OffsetNumber	max_offset_;	/* page size in items */
+	ScanKeyData 	skey_;		/* initial key */
 
-struct zcurve_scan_ctx_s {
-	Relation 	rel_;
-	uint64		init_zv_;
-	Buffer		buf_;
-	OffsetNumber	offset_;
-	OffsetNumber	max_offset_;
-	ScanKeyData 	skey_;
+	uint64		cur_val_;	/* current value of cursor */
+	uint64		next_val_;	/* forward value of cursor for some special cases */
+	uint64		last_page_val_;	/* last value on the current page */
+	ItemPointerData iptr_;		/* table row pointer from the current cursor position */
 
-	uint64		cur_val_;	
-	uint64		last_page_val_;	
-	ItemPointerData iptr_;
+	BTStack		pstack_;	/* intermediate pages stack to the current page, need for possible interpages step */
+} zcurve_scan_ctx_t;
 
-	BTStack		pstack_;
-};
-typedef struct zcurve_scan_ctx_s zcurve_scan_ctx_t;
 
-extern int zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val);
-extern int zcurve_scan_move_next(zcurve_scan_ctx_t *ctx);
-extern int zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, uint64 check_val);
+/* 
+   analog of _bt_search from src\backend\access\nbtree\nbtsearch.c 
+   with some 2d zcurve specific
+   returns 0 if error occured
+*/
+extern int zcurve_search_2d(zcurve_scan_ctx_t *pctx);
+
+/* 
+   analog of _bt_binsearch from src\backend\access\nbtree\nbtsearch.c 
+   with some 2d zcurve specific
+*/
+extern OffsetNumber zcurve_binsrch_2d(zcurve_scan_ctx_t *pctx);
+
+/* 
+   analog of _bt_compare from src\backend\access\nbtree\nbtsearch.c 
+   with some 2d zcurve specific
+*/
+extern int32 zcurve_compare_2d(zcurve_scan_ctx_t *pctx, Page page, OffsetNumber offnum);
+
+/* context constructor */
 extern int zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, uint64 start_val);
+
+/* context destructor */
 extern int zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx);
+
+/* starting cursor, it may be resterted with new value without calling destructor */
+extern int zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val);
+
+/* cursor forward moving*/
+extern int zcurve_scan_move_next(zcurve_scan_ctx_t *ctx);
+
+/* testing next value on the folowing page, cursor preserves its position */
+extern int zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, uint64 check_val);
+
+/* testing for cursor is active */
 extern int zcurve_scan_ctx_is_opened(zcurve_scan_ctx_t *ctx);
 
-#endif  /*__SP_TREE_2D_H*/
+#endif  /*__ZCURVE_SP_TREE_2D_H*/

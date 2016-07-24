@@ -91,11 +91,8 @@ static int compare_uint64( const void *arg1, const void *arg2 )
   return *a > *b ? 1: -1;
 }
 
-SPIPlanPtr prep_interval_request();
-int fin_interval_request(SPIPlanPtr pplan);
-int run_interval_request(SPIPlanPtr pplan, uint64 v0, uint64 v1);
-
-SPIPlanPtr prep_interval_request()
+static SPIPlanPtr
+prep_interval_request()
 {
 	SPIPlanPtr	pplan;
 	char		sql[8192];
@@ -117,14 +114,15 @@ SPIPlanPtr prep_interval_request()
 	return pplan;
 }
 
-int fin_interval_request(SPIPlanPtr pplan)
+static int 
+fin_interval_request(SPIPlanPtr pplan)
 {
    SPI_finish();
    return 0;
 }
 
 
-int 
+static int 
 run_interval_request(SPIPlanPtr pplan, uint64 v0, uint64 v1)
 {
 	Datum		values[2];	/* key types to prepare execution plan */
@@ -144,10 +142,10 @@ run_interval_request(SPIPlanPtr pplan, uint64 v0, uint64 v1)
 		if (0 == SPI_processed || NULL == SPI_tuptable)
 			break;
 		{
-			TupleDesc tupdesc = SPI_tuptable->tupdesc;
+			/*TupleDesc tupdesc = SPI_tuptable->tupdesc;*/
 			for (i = 0; i < SPI_processed; i++)
 			{
-				HeapTuple tuple = SPI_tuptable->vals[i];
+				/*HeapTuple tuple = SPI_tuptable->vals[i];*/
 				/*elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2));*/
 				cnt++;
 			}
@@ -330,11 +328,11 @@ run_interval_request_ii(interval_ctx_t *ctx, uint64 v0, uint64 v1)
 		if (0 == SPI_processed || NULL == SPI_tuptable)
 			break;
 		{
-			TupleDesc tupdesc = SPI_tuptable->tupdesc;
+			/*TupleDesc tupdesc = SPI_tuptable->tupdesc;*/
 			for (i = 0; i < SPI_processed; i++)
 			{
-				HeapTuple tuple = SPI_tuptable->vals[i];
-/*				elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2)); */
+				/*HeapTuple tuple = SPI_tuptable->vals[i];*/
+				/*elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2)); */
 				cnt++;
 			}
 		}

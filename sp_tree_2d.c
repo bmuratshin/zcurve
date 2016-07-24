@@ -1,8 +1,11 @@
 /*
- *	PostgreSQL definitions for managed Large Objects.
+ * contrib/zcurve/list_sort.c
  *
- *	contrib/zcurve/zcurve.c
  *
+ * sp_tree_2d.c -- low level operations with numbers and 2D ZCurve index realized as a regular btree
+ *		
+ *
+ * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
  */
 
 #include <string.h>
@@ -20,7 +23,7 @@
 #include "storage/bufpage.h"
 
 #include "sp_tree_2d.h"
-#include "spatialIndex_2d.h"
+#include "sp_query_2d.h"
 #include "gen_list.h"
 #include "list_sort.h"
 
@@ -29,19 +32,25 @@
 #endif
 
 
+/* 
+   analog of _bt_compare from src\backend\access\nbtree\nbtsearch.c 
+   with some 2d zcurve specific
+*/
 int32
-zcurve_compare(Relation rel,
-			int keysz,
-			ScanKey scankey,
-			Page page,
-			OffsetNumber offnum)
+zcurve_compare_2d(
+	zcurve_scan_ctx_t *pctx,
+	Page page,
+	OffsetNumber offnum)
 {
+	Relation rel = pctx->rel_;
+	int keysz = 1;
+
 	TupleDesc	itupdesc = RelationGetDescr(rel);
 	BTPageOpaque opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 	IndexTuple	itup;
 	int		i;
 	uint64		cmpval;
-	cmpval = DatumGetInt64(scankey->sk_argument);
+	cmpval = DatumGetInt64(pctx->skey_.sk_argument);
 	/*
 	 * Force result ">" if target item is first data item on an internal page
 	 * --- see NOTE above.
@@ -79,6 +88,11 @@ zcurve_compare(Relation rel,
 	return 0;
 }
 
+/* 
+ * zcurve_binsrch_2d()
+ * analog of _bt_binsearch from src\backend\access\nbtree\nbtsearch.c 
+ * with some 2d zcurve specific
+ */
 /*
  *	_bt_binsrch() -- Do a binary search for a key on a particular page.
  *
@@ -107,20 +121,15 @@ zcurve_compare(Relation rel,
  * on the buffer.
  */
 OffsetNumber
-zcurve_binsrch(Relation rel,
-			Buffer buf,
-			int keysz,
-			ScanKey scankey,
-			bool nextkey)
+zcurve_binsrch_2d (zcurve_scan_ctx_t *pctx)
 {
-	Page		page;
+	bool nextkey = 0;
+	Page page;
 	BTPageOpaque opaque;
-	OffsetNumber low,
-				high;
-	int32		result,
-				cmpval;
+	OffsetNumber low, high;
+	int32 result, cmpval;
 
-	page = BufferGetPage(buf);
+	page = BufferGetPage(pctx->buf_);
 	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 
 	low = P_FIRSTDATAKEY(opaque);
@@ -159,7 +168,7 @@ zcurve_binsrch(Relation rel,
 		/* We have low <= mid < high, so mid points at a real slot */
 
 		/* elog(INFO, "(%d .. %d .. %d)", low, mid, high); */
-		result = zcurve_compare(rel, keysz, scankey, page, mid);
+		result = zcurve_compare_2d(pctx, page, mid);
 
 		if (result >= cmpval)
 			low = mid + 1;
@@ -174,7 +183,6 @@ zcurve_binsrch(Relation rel,
 	 * scan key), which could be the last slot + 1.
 	 */
 
-	/*elog(INFO, "bsearch %d", low);*/
 	if (P_ISLEAF(opaque))
 		return low;
 
@@ -187,6 +195,12 @@ zcurve_binsrch(Relation rel,
 	return OffsetNumberPrev(low);
 }
 
+/* 
+ * zcurve_search_2d()
+ * analog of _bt_search from src\backend\access\nbtree\nbtsearch.c 
+ * with some 2d zcurve specific
+ * returns 0 if error occured
+ */
 /*
  *	_bt_search() -- Search the tree for a particular scankey,
  *		or more precisely for the first leaf page it could be on.
@@ -208,20 +222,22 @@ zcurve_binsrch(Relation rel,
  * will result in *bufP being set to InvalidBuffer.  Also, in BT_WRITE mode,
  * any incomplete splits encountered during the search will be finished.
  */
-BTStack
-zcurve_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
-		   Buffer *bufP, int access)
+int
+zcurve_search_2d(zcurve_scan_ctx_t *pctx)
 {
-	BTStack		stack_in = NULL;
+	Relation rel = pctx->rel_;
+	int keysz = 1;
+	BTStack	stack_in = NULL;
 	int ilevel;
+	int access = BT_READ;
+	bool nextkey = 0;
 
 	/* Get the root page to start with */
-	*bufP = _bt_getroot(rel, access);
-
+	pctx->buf_ = _bt_getroot(rel, access);
 
 	/* If index is empty and access = BT_READ, no root page is created. */
-	if (!BufferIsValid(*bufP))
-		return (BTStack) NULL;
+	if (!BufferIsValid(pctx->buf_))
+		return 0;
 
 	/* Loop iterates once per level descended in the tree */
 	for (ilevel=0;;ilevel++)
@@ -247,11 +263,10 @@ zcurve_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 		 * if the leaf page is split and we insert to the parent page).  But
 		 * this is a good opportunity to finish splits of internal pages too.
 		 */
-		*bufP = _bt_moveright(rel, *bufP, keysz, scankey, nextkey,
-							  (access == BT_WRITE), stack_in,
-							  BT_READ);
+		pctx->buf_ = _bt_moveright(rel, pctx->buf_, keysz, &pctx->skey_, nextkey,
+						(access == BT_WRITE), stack_in,	  BT_READ);
 		/* if this is a leaf page, we're done */
-		page = BufferGetPage(*bufP);
+		page = BufferGetPage(pctx->buf_);
 
 		opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 		if (P_ISLEAF(opaque))
@@ -261,11 +276,11 @@ zcurve_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 		 * Find the appropriate item on the internal page, and get the child
 		 * page that it points to.
 		 */
-		offnum = zcurve_binsrch(rel, *bufP, keysz, scankey, nextkey);
+		offnum = zcurve_binsrch_2d (pctx);
 		itemid = PageGetItemId(page, offnum);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
-		par_blkno = BufferGetBlockNumber(*bufP);
+		par_blkno = BufferGetBlockNumber(pctx->buf_);
 
 		/*
 		 * We need to save the location of the index entry we chose in the
@@ -284,13 +299,13 @@ zcurve_search(Relation rel, int keysz, ScanKey scankey, bool nextkey,
 		new_stack->bts_parent = stack_in;
 
 		/* drop the read lock on the parent page, acquire one on the child */
-		*bufP = _bt_relandgetbuf(rel, *bufP, blkno, BT_READ);
+		pctx->buf_ = _bt_relandgetbuf(rel, pctx->buf_, blkno, BT_READ);
 
 		/* okay, all set to move down a level */
 		stack_in = new_stack;
 	}
-
-	return stack_in;
+	pctx->pstack_ = stack_in;
+	return 1;
 }
 
 
@@ -335,6 +350,8 @@ indexClose(Relation r)
 	index_close((r), AccessShareLock);
 }
 
+#if 0
+/* test only */
 static void 
 trace_page_2d(Relation rel, ScanKey skey, Page page)
 {
@@ -365,64 +382,17 @@ trace_page_2d(Relation rel, ScanKey skey, Page page)
 	}
 	elog(INFO, ">>>");
 }
+#endif
 
+/* resulting item temporarily storing for sorting */
+typedef struct res_item_s {
+	ItemPointerData iptr_;	/* pointer to rable row */
+	uint32		x_;	/* x coord */
+	uint32		y_;	/* y coord */
+	gen_list_t	link_;  /* next one */
+} res_item_t;
 
-PG_FUNCTION_INFO_V1(zcurve_2d_count);
-Datum
-zcurve_2d_count(PG_FUNCTION_ARGS)
-{
-	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
-  	uint64 x0  = PG_GETARG_INT64(1);
-	uint64 y0  = PG_GETARG_INT64(2);
-	uint64 x1  = PG_GETARG_INT64(3);
-	uint64 y1  = PG_GETARG_INT64(4);
-	uint64 cnt = 0;
-
-	List	   *relname_list;
-	RangeVar   *relvar;
-	Relation    relation;
-
-	relname_list = stringToQualifiedNameList(relname);
-	relvar = makeRangeVarFromNameList(relname_list);
-	relation = indexOpen(relvar);
-
-	/*elog(INFO, "%s height(%d) nattrs(%d)", relname, _bt_getrootheight(relation), RelationGetNumberOfAttributes(relation));*/
-
-
-	{
-		/*trace_tree_by_val(relation, start_zv);*/
-		spt_query2_def_t qdef;
-		int ret = 0;
-		uint32 x, y;
-		ItemPointerData iptr;
-
-		spt_query2_def_t_CTOR (&qdef, relation, x0, y0, x1, y1);
-
-		ret = pointSpatial2d_moveFirst(&qdef, &x, &y, &iptr);
-		/*elog(INFO, "moveFirst returns %d", ret);*/
-		while (ret)
-		{
-			cnt++;
-			ret = pointSpatial2d_moveNext(&qdef, &x, &y, &iptr);
-		}
-		spt_query2_def_t_DTOR (&qdef);
-		/*elog(INFO, "DTOR'ed spt_query2_def_t");*/
-	}
-
-	indexClose(relation);
-
-	PG_FREE_IF_COPY(relname, 0);
-   	PG_RETURN_INT64(cnt);
-}
-
-struct res_item_s {
-	ItemPointerData iptr_;
-	uint32		x_;
-	uint32		y_;
-	gen_list_t	link_;
-};
-typedef struct res_item_s res_item_t;
-
+/* in the end we need to sort found index items by t_tid*/
 static int  
 res_item_compare_proc(const void *a, const void *b, const void *arg)
 {
@@ -441,18 +411,19 @@ res_item_compare_proc(const void *a, const void *b, const void *arg)
 	return 0;
 }
 
-struct p2d_ctx_s {
-	Relation    		relation_;
-	spt_query2_def_t 	qdef_;
-	gen_list_t 		*result_;
-	gen_list_t 		*cur_;
-	int 			cnt_;
-};
-typedef struct p2d_ctx_s p2d_ctx_t;
-void p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64 x1, uint64 y1);
-void p2d_ctx_t_DTOR(p2d_ctx_t *ptr);
+/* SRF-resistent context */
+typedef struct p2d_ctx_s {
+	Relation    	relation_;	/* index tree */
+	spt_query2_t 	qdef_;		/* spatial query definition */
+	gen_list_t 	*result_;	/* head og resulting list */
+	gen_list_t 	*cur_;		/* current item for out */
+	int 		cnt_;		/* resulting list length */
+} p2d_ctx_t;
 
-void p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64 x1, uint64 y1)
+
+/* constructor */
+static void 
+p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64 x1, uint64 y1)
 {
 	List	   *relname_list;
 	RangeVar   *relvar;
@@ -465,17 +436,19 @@ void p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, u
 	ptr->cnt_ = 0;
 	ptr->result_ = NULL;
 	ptr->cur_ = NULL;
-	spt_query2_def_t_CTOR (&ptr->qdef_, ptr->relation_, x0, y0, x1, y1);
+	spt_query2_CTOR (&ptr->qdef_, ptr->relation_, x0, y0, x1, y1);
 }
 
-void p2d_ctx_t_DTOR(p2d_ctx_t *ptr)
+/* destructor */
+static void 
+p2d_ctx_t_DTOR(p2d_ctx_t *ptr)
 {
 	Assert(ptr);
 	indexClose(ptr->relation_);
 	ptr->relation_ = NULL;
 	ptr->result_ = NULL;
 	ptr->cur_ = NULL;
-	spt_query2_def_t_DTOR (&ptr->qdef_);
+	spt_query2_DTOR (&ptr->qdef_);
 }
 
 
@@ -485,8 +458,6 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 {
 	/* SRF stuff */
 	FuncCallContext     *funcctx = NULL;
-	int                  call_cntr;
-	int                  max_calls;
 	TupleDesc            tupdesc;
 	AttInMetadata       *attinmeta;
 	p2d_ctx_t 	    *pctx = NULL;
@@ -503,6 +474,7 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		MemoryContext   oldcontext;
 		funcctx = SRF_FIRSTCALL_INIT();
 
+		/* recordset cosists of 3 columns - t_tid & coordinates */
 		tupdesc = CreateTemplateTupleDesc(3, false);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "ctid", TIDOID, -1, 0);
 		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "x", INT4OID, -1, 0);
@@ -519,17 +491,19 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 
 		attinmeta = TupleDescGetAttInMetadata(tupdesc);
 		funcctx->attinmeta = attinmeta;
-
+		/* lets start lookup, storing intermediate data in context list */
 		{
 			int 		ret;
 			uint32 		x, y;
 			ItemPointerData iptr;
 
+			/* prepare lookup context */
 			pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
 			p2d_ctx_t_CTOR(pctx, relname, x0, y0, x1, y1);
 			funcctx->user_fctx = pctx;
 
-			ret = pointSpatial2d_moveFirst(&pctx->qdef_, &x, &y, &iptr);
+			/* performing spatial cursor forwarding */
+			ret = spt_query2_moveFirst(&pctx->qdef_, &x, &y, &iptr);
 			while (ret)
 			{
 				res_item_t *pit = (res_item_t *)palloc(sizeof(res_item_t));
@@ -541,12 +515,12 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 				pctx->result_ = &pit->link_;
 
 				pctx->cnt_++;
-				ret = pointSpatial2d_moveNext(&pctx->qdef_, &x, &y, &iptr);
+				ret = spt_query2_moveNext(&pctx->qdef_, &x, &y, &iptr);
 			}
+			/* sort temporary data */
 			pctx->result_ = list_sort (pctx->result_,  res_item_compare_proc, NULL);
 			pctx->cur_ = pctx->result_;
 		}
-
 		MemoryContextSwitchTo(oldcontext);
 	}
 
@@ -554,8 +528,6 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 	funcctx = SRF_PERCALL_SETUP();
 	pctx = (p2d_ctx_t *) funcctx->user_fctx;
 
-	call_cntr = funcctx->call_cntr;
-	max_calls = funcctx->max_calls;
 	attinmeta = funcctx->attinmeta;
 
 	{
@@ -563,10 +535,10 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		bool		nulls[3];
 	        HeapTuple    	htuple;
 	        Datum        	result;
-
+		/* while the end of result list is not reached */
 		if (pctx->cur_)
 		{
-			res_item_t	*pit = (res_item_t *)(pctx->cur_->data);
+			res_item_t *pit = (res_item_t *)(pctx->cur_->data);
 			datums[0] = PointerGetDatum(&pit->iptr_);
 			datums[1] = Int32GetDatum(pit->x_);
 			datums[2] = Int32GetDatum(pit->y_);
@@ -582,6 +554,7 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		}
 		else
 		{
+			/* no more data, free resources and stop lookup */
 			p2d_ctx_t_DTOR(pctx);
 		}	
 	}
@@ -589,6 +562,12 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 	SRF_RETURN_DONE(funcctx);
 }
 
+
+/* 
+   in some circumstances our spatial subquery reached the end of page,
+   but last page item is equal the end of query, so we can find some data on the page next
+   if preserve_position is true, cursor after return stays untouched
+ */
 static int 
 zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 {
@@ -598,7 +577,9 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 	IndexTuple	itup;
 	Datum		arg;
 	bool		null;
+	int 		ilevel = 0;
 
+	/* save the cursor context */
 	BlockNumber	old_block_num = (ctx->buf_) ? BufferGetBlockNumber(ctx->buf_) : 0;
 	BlockNumber	new_block_num = 0;
 
@@ -610,26 +591,27 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 
 	ItemPointerData old_iptr = ctx->iptr_;
 
-
-	/*elog(INFO, "zcurve_scan_step_forward (%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
-	int 	ilevel = 0;
 	for (;;)
 	{
 		BTPageOpaque opaque;
 		OffsetNumber mx = 0;
 		ilevel++;
 
-		/*elog(INFO, "level(%d) blkno(%d) offset(%d)", ilevel - 1, stack->bts_blkno, stack->bts_offset);*/
+		/* such as we currently at the pasge end, we need to step upper by pages stack and then down to the next page */
 		/* drop the read lock on the parent page, acquire one on the child */
 		ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, stack->bts_blkno, BT_READ);
 		new_block_num = stack->bts_blkno;
 		page = BufferGetPage(ctx->buf_);
 		mx = PageGetMaxOffsetNumber(page);
-		/*elog(INFO, "max=(%d)", mx);*/
+
+		/* if we are not at the end of the parent's page 
+		   otherwise, just keep step upper
+		*/
 		if (stack->bts_offset < mx)
 		{
 			BlockNumber  blkno;
 			int i;
+			/* one step down to (stack->bts_offset + 1) item */
 			{
 				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 				itemid = PageGetItemId(page, stack->bts_offset + 1);
@@ -643,6 +625,7 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 				ctx->offset_ = P_FIRSTDATAKEY(opaque);
 			}
+			/* and then going down by the first only items */
 			for (i = 0; i < ilevel - 1; i++)
 			{
 				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
@@ -651,16 +634,18 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 				itup = (IndexTuple) PageGetItem(page, itemid);
 				blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
 
-				/*elog (INFO, "BLKNO=%d", blkno);*/
 				new_block_num = blkno;
 				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
 				page = BufferGetPage(ctx->buf_);
 			}
+
+			/* filling cursor context */
 			ctx->max_offset_ = PageGetMaxOffsetNumber(page);
 			itemid = PageGetItemId(page, ctx->offset_);
 			itup = (IndexTuple) PageGetItem(page, itemid);
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 			ctx->cur_val_ = DatumGetInt64(arg);
+			ctx->next_val_ = ctx->cur_val_;
 			ctx->iptr_ = itup->t_tid;
 
 			itemid = PageGetItemId(page, ctx->max_offset_);
@@ -668,18 +653,18 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 			ctx->last_page_val_ = DatumGetInt64(arg);
 
+			/* and restoring context back if necessary */
 			if (preserve_position && old_block_num && old_block_num != new_block_num)
 			{
 				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, old_block_num, BT_READ);
 
 				ctx->offset_ = old_offset;
 				ctx->max_offset_ = old_max_offset;
-
 				ctx->cur_val_ = old_cur_val;
 				ctx->last_page_val_ = old_last_page_val;
 				ctx->iptr_ = old_iptr;
+				/* ctx->next_val_ not restored */
 			}
-			/*elog(INFO, "zcurve_scan_step_forward (EOF)(%lx -> %lx)[%d %d]", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_);*/
 			return 1;
 		}
 
@@ -691,34 +676,74 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
   return 0;
 }
 
+/* constructing a scan context, it may be restarted later with other start_val */
+int 
+zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, uint64 start_val)
+{
+	Assert(ctx);
+	ctx->rel_ = rel;
+	ctx->init_zv_ = start_val;
+	ScanKeyInit(&ctx->skey_, 1, BTLessStrategyNumber, F_INT8LE, Int64GetDatum(start_val));
+	ctx->offset_ = 0;
+	ctx->max_offset_ = 0;
+	ctx->cur_val_ = 0;
+	ctx->last_page_val_ = 0;
+	ctx->buf_ = 0;
+	ctx->pstack_ = NULL;
+	return 1;
+}
+
+/* destructor, unlock page and free pages stack*/
+int 
+zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx)
+{
+	Assert(ctx);
+	if (ctx->rel_ && ctx->buf_)
+	{
+		_bt_relbuf(ctx->rel_, ctx->buf_);
+	}
+
+	if (ctx->pstack_)
+	{
+		_bt_freestack(ctx->pstack_);
+	}
+
+	memset(ctx, 0, sizeof(*ctx));
+	return 1;
+}
+
+
+/* starting cursor, it may be restorted with new value without calling destructor */
 int 
 zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 {
-	bool 	nextkey = 0;
-	Page 	page;
-
+	Page 		page;
 	ItemId		itemid;
 	IndexTuple	itup;
 	Datum		arg;
 	bool		null;
 
-	/*elog(INFO, "zcurve_scan_move_first(%lx %p %d)", start_val, ctx->pstack_, (int)ctx->buf_);*/
-
+	/* first, let's free a page from last subquery if exists */
 	if (ctx->buf_)
 		_bt_relbuf(ctx->rel_, ctx->buf_);
 
-
+	/* reinit starting values */
 	ctx->init_zv_ = start_val;
 	ctx->skey_.sk_argument = Int64GetDatum(start_val);
 
+	/* let's free a pages stack from last subquery if exists */
 	if (ctx->pstack_)
 		_bt_freestack(ctx->pstack_);
 
-	ctx->pstack_ = zcurve_search(ctx->rel_, 1, &ctx->skey_, nextkey,  &ctx->buf_, BT_READ);
-	if (NULL == ctx->pstack_)
+	/* index tree lookup by the starting value */
+	if (0 == zcurve_search_2d(ctx))
 		return 0;
 
-	ctx->offset_ = zcurve_binsrch(ctx->rel_, ctx->buf_, 1, &ctx->skey_, nextkey);
+	/* 
+	   found smth, ok 
+	   now trying to find >= item on the list page and store cursore position 
+	 */
+	ctx->offset_ = zcurve_binsrch_2d (ctx);
 	page = BufferGetPage(ctx->buf_);
 	ctx->max_offset_ = PageGetMaxOffsetNumber(page);
 	if (ctx->offset_ <= ctx->max_offset_)
@@ -734,19 +759,18 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->last_page_val_ = DatumGetInt64(arg);
 
-		/*trace_page_2d(ctx->rel_, &ctx->skey_, page);*/
-
-		/*elog(INFO, "zcurve_scan_move_first (%lx -> %lx)[%d %d]{%p}", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_, ctx->pstack_);*/
 		return 1;
 	}
 	else
 	{
+		/* well, our item between pages, we need to move cursor forward */
 		return zcurve_scan_step_forward(ctx, false);
 	}
-	/*elog(INFO, "zcurve_scan_move_first (EOF)[%d %d]", ctx->offset_, ctx->max_offset_);*/
+	/* notreached */
 	return 0;
 }
 
+/* cursor forward moving*/
 int 
 zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 {
@@ -754,6 +778,10 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 	/*elog(INFO, "zcurve_scan_move_next");*/
 	if (ctx->offset_ < ctx->max_offset_)
 	{
+		/* 
+		   our cursor currently points into the page, the end is not reached 
+		   just increase ctx->offset_ and store position params
+		 */
 		Page 		page;
 		ItemId		itemid;
 		IndexTuple	itup;
@@ -767,70 +795,33 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 		ctx->cur_val_ = DatumGetInt64(arg);
 		ctx->iptr_ = itup->t_tid;
-		/*elog(INFO, "zcurve_scan_move_next (%lx -> %lx)[%d %d]{%p}", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_, ctx->pstack_);*/
 		return 1;
 	}
-	/*elog(INFO, "zcurve_scan_move_next OOPS");*/
+
+	/* page ends, just move to next one */
 	return zcurve_scan_step_forward(ctx, false);
 }
 
+/* test first item on the next page */
 int 
 zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, uint64 check_val)
 {
+	/* do nothing if the cursor is not on the end of page */
 	if (ctx->offset_ < ctx->max_offset_)
 	{
 		return 1;
 	}
-
-	/*elog(INFO, "zcurve_scan_try_move_next(%lx)\t\tOOPS", check_val);*/
+	/* test first item on the next page */
 	if (zcurve_scan_step_forward(ctx, true))
 	{
-		int ret = (ctx->cur_val_ <= check_val) ? 1 : 0;
-		/*elog(INFO, "zcurve_scan_try_move_next (%lx -> %lx)[%d %d]{%d}", ctx->cur_val_, ctx->last_page_val_, ctx->offset_, ctx->max_offset_, ret);*/
+		int ret = (ctx->next_val_ <= check_val) ? 1 : 0;
+		/* if it is in subquery range, return true */
 		return ret;
 	}
 	return 0;
 }
 
-int 
-zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, uint64 start_val)
-{
-	Assert(ctx);
-	ctx->rel_ = rel;
-	ctx->init_zv_ = start_val;
-	ScanKeyInit(&ctx->skey_, 1/*key part idx*/, BTLessStrategyNumber, F_INT8LE, Int64GetDatum(start_val));
-	ctx->offset_ = 0;
-	ctx->max_offset_ = 0;
-	ctx->cur_val_ = 0;
-	ctx->last_page_val_ = 0;
-	ctx->buf_ = 0;
-	ctx->pstack_ = NULL;
-	/*elog(INFO, "zcurve_scan_ctx_CTOR(%ld)", sizeof(ctx->buf_));*/
-	return 1;
-}
-
-int 
-zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx)
-{
-	Assert(ctx);
-	if (ctx->rel_)
-	{
-		if (ctx->buf_)
-			_bt_relbuf(ctx->rel_, ctx->buf_);
-		memset(ctx, 0, sizeof(*ctx));
-		/*elog(INFO, "zcurve_scan_ctx_DTOR");*/
-		return 0;
-	}
-
-	if (ctx->pstack_)
-	{
-		_bt_freestack(ctx->pstack_);
-		ctx->pstack_ = NULL;
-	}
-
-	return -1;
-}
-
+/* testing for cursor is active */
 int 
 zcurve_scan_ctx_is_opened(zcurve_scan_ctx_t *ctx)
 {

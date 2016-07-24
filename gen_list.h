@@ -1,12 +1,19 @@
-#ifndef __GEN_LIST_H
-#define __GEN_LIST_H
+/*
+ * contrib/zcurve/gen_list.h
+ *
+ *
+ * gen_list.h -- generic list declaration
+ *		
+ *
+ * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
+ */
 
+#ifndef __ZCURVE_GEN_LIST_H
+#define __ZCURVE_GEN_LIST_H
 
-struct gen_list_s {
+typedef struct gen_list_s {
 	struct gen_list_s *next;
 	void		  *data;
-};
-typedef struct gen_list_s gen_list_t;
+} gen_list_t;
 
-
-#endif
+#endif /*__ZCURVE_GEN_LIST_H*/
