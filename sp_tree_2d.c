@@ -17,6 +17,8 @@
 #include "utils/builtins.h"
 #include "utils/lsyscache.h"
 #include "utils/fmgroids.h"
+#include "utils/builtins.h"
+#include "utils/numeric.h"
 #include "catalog/namespace.h"
 #include "access/nbtree.h"
 #include "access/htup_details.h"
@@ -29,6 +31,45 @@
 
 #if PG_VERSION_NUM >= 90600
 #define heap_formtuple heap_form_tuple
+#endif
+
+#if 0
+/* test only */
+static void 
+trace_page_2d(Relation rel, ScanKey skey, Page page)
+{
+	ItemId		itemid;
+	IndexTuple	itup;
+	Datum		arg;
+	bool		null;
+	OffsetNumber	maxoff = 0, off;
+	uint32		ix, iy;
+	uint64		zv;
+
+	BTPageOpaque opaque;
+	OffsetNumber low;
+
+	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+	low = P_FIRSTDATAKEY(opaque);
+
+	elog(INFO, "<<<");
+	maxoff = PageGetMaxOffsetNumber(page);
+	for (off = low; off <= maxoff; off++)
+	{
+		itemid = PageGetItemId(page, off);
+		itup = (IndexTuple) PageGetItem(page, itemid);
+
+		arg = index_getattr(itup, 1, RelationGetDescr(rel), &null);
+		zv = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
+		zcurve_toXY (zv, &ix, &iy);
+		elog(INFO, "%d) val(%ld), x(%d), y(%d), cmp(%d) dead(%d)", 
+			off, zv, ix, iy, 
+			_bt_compare(rel, 1, skey, page, off), 
+			ItemIdIsDead(itemid));
+
+	}
+	elog(INFO, ">>>");
+}
 #endif
 
 
@@ -77,9 +118,11 @@ zcurve_compare_2d(
 		Datum		datum;
 		bool		isNull;
 		uint64		keyval;
+		//void 		*nm;
 
 		datum = index_getattr(itup, i, itupdesc, &isNull);
-		keyval = DatumGetInt64(datum);
+		//nm = DatumGetNumeric(datum);
+		keyval = DatumGetInt64(DirectFunctionCall1(numeric_int8, datum));//DatumGetInt64(datum);
 		if (keyval != cmpval)
 		{
 			return keyval > cmpval ? -1 : 1;
@@ -350,40 +393,6 @@ indexClose(Relation r)
 	index_close((r), AccessShareLock);
 }
 
-#if 0
-/* test only */
-static void 
-trace_page_2d(Relation rel, ScanKey skey, Page page)
-{
-	ItemId		itemid;
-	IndexTuple	itup;
-	Datum		arg;
-	bool		null;
-	OffsetNumber	maxoff = 0, off;
-	uint32		ix, iy;
-
-	BTPageOpaque opaque;
-	OffsetNumber low;
-
-	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-	low = P_FIRSTDATAKEY(opaque);
-
-	elog(INFO, "<<<");
-	maxoff = PageGetMaxOffsetNumber(page);
-	for (off = low; off <= maxoff; off++)
-	{
-		itemid = PageGetItemId(page, off);
-		itup = (IndexTuple) PageGetItem(page, itemid);
-
-		arg = index_getattr(itup, 1, RelationGetDescr(rel), &null);
-		zcurve_toXY (DatumGetInt64(arg), &ix, &iy);
-		elog(INFO, "%d) val(%ld), x(%d), y(%d), cmp(%d) dead(%d)", off, DatumGetInt64(nocache_index_getattr(itup, 1, RelationGetDescr(rel))), ix, iy, _bt_compare(rel, 1, skey, page, off), ItemIdIsDead(itemid));
-
-	}
-	elog(INFO, ">>>");
-}
-#endif
-
 /* resulting item temporarily storing for sorting */
 typedef struct res_item_s {
 	ItemPointerData iptr_;	/* pointer to rable row */
@@ -644,14 +653,14 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 			itemid = PageGetItemId(page, ctx->offset_);
 			itup = (IndexTuple) PageGetItem(page, itemid);
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-			ctx->cur_val_ = DatumGetInt64(arg);
+			ctx->cur_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
 			ctx->next_val_ = ctx->cur_val_;
 			ctx->iptr_ = itup->t_tid;
 
 			itemid = PageGetItemId(page, ctx->max_offset_);
 			itup = (IndexTuple) PageGetItem(page, itemid);
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-			ctx->last_page_val_ = DatumGetInt64(arg);
+			ctx->last_page_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
 
 			/* and restoring context back if necessary */
 			if (preserve_position && old_block_num && old_block_num != new_block_num)
@@ -745,19 +754,20 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 	 */
 	ctx->offset_ = zcurve_binsrch_2d (ctx);
 	page = BufferGetPage(ctx->buf_);
+
 	ctx->max_offset_ = PageGetMaxOffsetNumber(page);
 	if (ctx->offset_ <= ctx->max_offset_)
 	{
 		itemid = PageGetItemId(page, ctx->offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		ctx->cur_val_ = DatumGetInt64(arg);
+		ctx->cur_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
 		ctx->iptr_ = itup->t_tid;
 
 		itemid = PageGetItemId(page, ctx->max_offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		ctx->last_page_val_ = DatumGetInt64(arg);
+		ctx->last_page_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
 
 		return 1;
 	}
@@ -793,7 +803,7 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 		itemid = PageGetItemId(page, ctx->offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		ctx->cur_val_ = DatumGetInt64(arg);
+		ctx->cur_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
 		ctx->iptr_ = itup->t_tid;
 		return 1;
 	}

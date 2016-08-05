@@ -10,6 +10,7 @@
 #include "fmgr.h"
 #include <string.h>
 #include "executor/spi.h"
+#include "utils/builtins.h"
 
 PG_MODULE_MAGIC;
 
@@ -71,6 +72,19 @@ zcurve_val_from_xy(PG_FUNCTION_ARGS)
    uint64 v2  = PG_GETARG_INT64(1);
 
    PG_RETURN_INT64(zcurve_fromXY(v1, v2));
+}
+
+
+PG_FUNCTION_INFO_V1(zcurve_num_from_xy);
+
+Datum
+zcurve_num_from_xy(PG_FUNCTION_ARGS)
+{
+   uint64 v1  = PG_GETARG_INT64(0);
+   uint64 v2  = PG_GETARG_INT64(1);
+   uint64 res  = zcurve_fromXY(v1, v2);
+   Datum result = DirectFunctionCall1(int8_numeric, res);
+   return result;
 }
 
 
