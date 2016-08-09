@@ -24,6 +24,7 @@
 
 #include "sp_tree_2d.h"
 #include "sp_query_2d.h"
+#include "bitkey.h"
 
 
 /* constructor */
@@ -37,6 +38,10 @@ spt_query2_CTOR (spt_query2_t *ps, Relation rel, uint32 minx, uint32 miny, uint3
 	ps->minY_ = miny;
 	ps->maxX_ = maxx;
 	ps->maxY_ = maxy;
+
+	bitKey_CTOR2(&ps->currentKey_);			
+	bitKey_CTOR2(&ps->lastKey_);
+
 	/* tree cursor init */
 	zcurve_scan_ctx_CTOR(&ps->qctx_, rel, 0);
 }
@@ -54,6 +59,7 @@ spt_query2_DTOR (spt_query2_t *ps)
 spatial2Query_t *
 spt_query2_createQuery(spt_query2_t *q)
 {
+	spatial2Query_t *ret = NULL;
 	Assert(q);
 	if(q->freeHead_)
 	{
@@ -61,7 +67,12 @@ spt_query2_createQuery(spt_query2_t *q)
 		q->freeHead_ = q->freeHead_->prevQuery_;
 		return retval;
 	}
-	return (spatial2Query_t *)palloc(sizeof(spatial2Query_t));
+	ret = (spatial2Query_t *)palloc(sizeof(spatial2Query_t));
+	ret->curBitNum_ = 0;
+	ret->prevQuery_ = NULL;
+	bitKey_CTOR2(&ret->lowKey_);
+	bitKey_CTOR2(&ret->highKey_);
+	return ret;
 }
 
 /* push subquery to the reuse list */
@@ -103,14 +114,20 @@ spt_query2_releaseSubQuery(spt_query2_t *q)
 int
 spt_query2_moveFirst(spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData *iptr)
 {
+	uint32 coords[ZKEY_MAX_COORDS];
 	Assert(q && x && y && iptr);
 
 	q->queryHead_ = spt_query2_createQuery (q);
 	q->queryHead_->prevQuery_ = NULL;
 	q->queryHead_->curBitNum_ = 63;
 
-	bit2Key_fromXY(&q->queryHead_->lowKey_, q->minX_, q->minY_);
-	bit2Key_fromXY(&q->queryHead_->highKey_, q->maxX_, q->maxY_);
+	coords[0] = q->minX_;
+	coords[1] = q->minY_;
+	bitKey_fromCoords(&q->queryHead_->lowKey_, coords, ZKEY_MAX_COORDS); //q->minX_, q->minY_);
+
+	coords[0] = q->maxX_;
+	coords[1] = q->maxY_;
+	bitKey_fromCoords(&q->queryHead_->highKey_, coords, ZKEY_MAX_COORDS); //q->maxX_, q->maxY_);
 
 	return spt_query2_findNextMatch(q, x, y, iptr);
 }
@@ -145,7 +162,7 @@ spt_query2_moveNext (spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData *ip
 	}
 
 	/* up to the lookup diapason end */
-	while (q->currentKey_.val_ <= q->queryHead_->highKey_.val_)
+	while (bitKey_cmp(&q->currentKey_, &q->queryHead_->highKey_) <= 0)//q->currentKey_.val_ <= q->queryHead_->highKey_.val_)
 	{
 		/* test if current key in lookup extent */
 		if (spt_query2_checkKey(q, x, y))
@@ -183,9 +200,9 @@ spt_query2_checkNextPage(spt_query2_t *q)
 {
 	if (q->qctx_.offset_ == q->qctx_.max_offset_)
 	{
-		if (!zcurve_scan_try_move_next(&q->qctx_, q->queryHead_->highKey_.val_))
+		if (!zcurve_scan_try_move_next(&q->qctx_, &q->queryHead_->highKey_))
 			return 0;
-		if (q->qctx_.next_val_ > q->queryHead_->highKey_.val_)
+		if (bitKey_cmp(&q->qctx_.next_val_, &q->queryHead_->highKey_) > 0) //q->qctx_.next_val_ > q->queryHead_->highKey_.val_)
 			return 0;
 		return 1;
 	}
@@ -206,21 +223,21 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData
 	{
 		q->subQueryFinished_ = 0;
 		/* (re)initialize cursor */
-		if(!spt_query2_queryFind(q, q->queryHead_->lowKey_.val_))
+		if(!spt_query2_queryFind(q, &q->queryHead_->lowKey_))
 		{
 			/* end of tree */
 			spt_query2_closeQuery (q);
 			return 0;
 		}
 		/* while there is something to split (last value on the current page less then the upper bound of subquery diapason) */
-		while (q->lastKey_.val_ < q->queryHead_->highKey_.val_)
+		while (bitKey_cmp(&q->lastKey_, &q->queryHead_->highKey_) < 0)//q->lastKey_.val_ < q->queryHead_->highKey_.val_)
 		{
 			/* let's split query */
 			spatial2Query_t *subQuery = NULL;
 
 			/* decrease curBitNum till corresponding bits are equal in both diapason numbers */
-			while ( bit2Key_getBit(&q->queryHead_->lowKey_, q->queryHead_->curBitNum_) == 
-				bit2Key_getBit(&q->queryHead_->highKey_, q->queryHead_->curBitNum_))
+			while ( bitKey_getBit(&q->queryHead_->lowKey_, q->queryHead_->curBitNum_) == 
+				bitKey_getBit(&q->queryHead_->highKey_, q->queryHead_->curBitNum_))
 			{
 				q->queryHead_->curBitNum_--;
 			}
@@ -233,9 +250,9 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData
 			subQuery->lowKey_ = q->queryHead_->lowKey_;
 			subQuery->highKey_ = q->queryHead_->highKey_;
 			/* cut diapason by curBitNum for new subquery */
-			bit2Key_setLowBits(&subQuery->highKey_, q->queryHead_->curBitNum_);
+			bitKey_setLowBits(&subQuery->highKey_, q->queryHead_->curBitNum_);
 			/* cut diapason by curBitNum for old subquery */
-			bit2Key_clearLowBits(&q->queryHead_->lowKey_, q->queryHead_->curBitNum_);
+			bitKey_clearLowBits(&q->queryHead_->lowKey_, q->queryHead_->curBitNum_);
 			/* decrease bits pointers */
 			subQuery->curBitNum_ = --q->queryHead_->curBitNum_;
 
@@ -259,7 +276,7 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData
 		}
 
 		/* up to the lookup diapason end */
-        	while (q->currentKey_.val_ <= q->queryHead_->highKey_.val_)
+        	while (bitKey_cmp(&q->currentKey_, &q->queryHead_->highKey_) <= 0)//q->currentKey_.val_ <= q->queryHead_->highKey_.val_)
 		{
 			/* test if current key in lookup extent */
 			if (spt_query2_checkKey(q, x, y))
@@ -292,41 +309,30 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData
 int
 spt_query2_checkKey (spt_query2_t *q, uint32 *x, uint32 * y)
 {
-	/* bit over bit */
-  	uint64 bitMask = 0xAAAAAAAAAAAAAAAAULL;
-	bit2Key_t *lKey = &q->queryHead_->lowKey_;
-	bit2Key_t *hKey = &q->queryHead_->highKey_;
-	int i;
+	const bitKey_t *lKey = &q->queryHead_->lowKey_;
+	const bitKey_t *hKey = &q->queryHead_->highKey_;
+	uint32 coords[ZKEY_MAX_COORDS];
 
-	/* by X & Y */
-	for(i = 0; i < 2; i++, bitMask >>= 1)
-	{
-		/* current coordinate */
-		uint64 tmpK = q->currentKey_.val_ & bitMask;
-		/* diapason High and Low coordinates */
-		uint64 tmpL = lKey->val_ & bitMask;
-		uint64 tmpH = hKey->val_ & bitMask;
+	if (0 == bitKey_between(&q->currentKey_, lKey, hKey))
+		return 0;
 
-		if (tmpK < tmpL)
-			return 0;
-		if (tmpK > tmpH)
-			return 0;
-	}
 	/* OK, return data */
 	Assert(x);
 	Assert(y);
-	bit2Key_toXY (&q->currentKey_, x, y);
+	bitKey_toCoords (&q->currentKey_, coords, ZKEY_MAX_COORDS);
+	*x = coords[0];
+	*y = coords[1];
 	return 1;
 }
 
 /* performs index cursor lookup for start_val */
 int
-spt_query2_queryFind (spt_query2_t *q, uint64 start_val)
+spt_query2_queryFind (spt_query2_t *q, const bitKey_t *start_val)
 {
 	int ret = zcurve_scan_move_first(&q->qctx_, start_val);
 	Assert(q);
-	q->currentKey_.val_ = q->qctx_.cur_val_;
-	q->lastKey_.val_ = q->qctx_.last_page_val_;
+	q->currentKey_ = q->qctx_.cur_val_;
+	q->lastKey_ = q->qctx_.last_page_val_;
 	q->iptr_ = q->qctx_.iptr_;
 	return ret;
 }
@@ -337,8 +343,8 @@ spt_query2_queryNextKey (spt_query2_t *q)
 {
 	int ret = zcurve_scan_move_next(&q->qctx_);
 	Assert(q);
-	q->currentKey_.val_ = q->qctx_.cur_val_;
-	q->lastKey_.val_ = q->qctx_.last_page_val_;
+	q->currentKey_ = q->qctx_.cur_val_;
+	q->lastKey_ = q->qctx_.last_page_val_;
 	q->iptr_ = q->qctx_.iptr_;
 	return ret;
 }

@@ -90,8 +90,8 @@ zcurve_compare_2d(
 	BTPageOpaque opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 	IndexTuple	itup;
 	int		i;
-	uint64		cmpval;
-	cmpval = DatumGetInt64(pctx->skey_.sk_argument);
+	//uint64		cmpval;
+	//cmpval = DatumGetInt64(pctx->skey_.sk_argument);
 	/*
 	 * Force result ">" if target item is first data item on an internal page
 	 * --- see NOTE above.
@@ -117,16 +117,25 @@ zcurve_compare_2d(
 	{
 		Datum		datum;
 		bool		isNull;
-		uint64		keyval;
+		//uint64		keyval;
+		int cmp;
 		//void 		*nm;
 
 		datum = index_getattr(itup, i, itupdesc, &isNull);
 		//nm = DatumGetNumeric(datum);
-		keyval = DatumGetInt64(DirectFunctionCall1(numeric_int8, datum));//DatumGetInt64(datum);
-		if (keyval != cmpval)
-		{
-			return keyval > cmpval ? -1 : 1;
-		}
+
+		cmp = DatumGetInt32(
+			DirectFunctionCall2(
+				numeric_cmp,
+				pctx->skey_.sk_argument,
+				datum));
+		if (cmp)
+			return cmp;
+		//keyval = DatumGetInt64(DirectFunctionCall1(numeric_int8, datum));//DatumGetInt64(datum);
+		//if (keyval != cmpval)
+		//{
+		//	return keyval > cmpval ? -1 : 1;
+		//}
 	}
 	return 0;
 }
@@ -594,12 +603,11 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 
 	OffsetNumber	old_offset = ctx->offset_;
 	OffsetNumber	old_max_offset = ctx->max_offset_;
-
-	uint64		old_cur_val = ctx->cur_val_;
-	uint64		old_last_page_val = ctx->last_page_val_;
-
 	ItemPointerData old_iptr = ctx->iptr_;
 
+	bitKey_t	old_cur_val = ctx->cur_val_;
+	bitKey_t	old_last_page_val = ctx->last_page_val_;
+	
 	for (;;)
 	{
 		BTPageOpaque opaque;
@@ -653,14 +661,14 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 			itemid = PageGetItemId(page, ctx->offset_);
 			itup = (IndexTuple) PageGetItem(page, itemid);
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-			ctx->cur_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
+			bitKey_fromLong(&ctx->cur_val_, arg);
 			ctx->next_val_ = ctx->cur_val_;
 			ctx->iptr_ = itup->t_tid;
 
 			itemid = PageGetItemId(page, ctx->max_offset_);
 			itup = (IndexTuple) PageGetItem(page, itemid);
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-			ctx->last_page_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
+			bitKey_fromLong(&ctx->last_page_val_, arg);
 
 			/* and restoring context back if necessary */
 			if (preserve_position && old_block_num && old_block_num != new_block_num)
@@ -687,16 +695,17 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 
 /* constructing a scan context, it may be restarted later with other start_val */
 int 
-zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, uint64 start_val)
+zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, const bitKey_t *start_val)
 {
-	Assert(ctx);
+	Assert(ctx && start_val);
 	ctx->rel_ = rel;
-	ctx->init_zv_ = start_val;
-	ScanKeyInit(&ctx->skey_, 1, BTLessStrategyNumber, F_INT8LE, Int64GetDatum(start_val));
+	ctx->init_zv_ =  *start_val;
+	ScanKeyInit(&ctx->skey_, 1, BTLessStrategyNumber, F_INT8LE, bitKey_toLong(start_val));
 	ctx->offset_ = 0;
 	ctx->max_offset_ = 0;
-	ctx->cur_val_ = 0;
-	ctx->last_page_val_ = 0;
+	bitKey_CTOR2(&ctx->cur_val_);
+	bitKey_CTOR2(&ctx->next_val_);
+	bitKey_CTOR2(&ctx->last_page_val_);
 	ctx->buf_ = 0;
 	ctx->pstack_ = NULL;
 	return 1;
@@ -724,7 +733,7 @@ zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx)
 
 /* starting cursor, it may be restorted with new value without calling destructor */
 int 
-zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
+zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, const bitKey_t *start_val)
 {
 	Page 		page;
 	ItemId		itemid;
@@ -737,8 +746,8 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 		_bt_relbuf(ctx->rel_, ctx->buf_);
 
 	/* reinit starting values */
-	ctx->init_zv_ = start_val;
-	ctx->skey_.sk_argument = Int64GetDatum(start_val);
+	ctx->init_zv_ = *start_val;
+	ctx->skey_.sk_argument = bitKey_toLong(start_val);
 
 	/* let's free a pages stack from last subquery if exists */
 	if (ctx->pstack_)
@@ -761,13 +770,13 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, uint64 start_val)
 		itemid = PageGetItemId(page, ctx->offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		ctx->cur_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
+		bitKey_fromLong(&ctx->cur_val_, arg);
 		ctx->iptr_ = itup->t_tid;
 
 		itemid = PageGetItemId(page, ctx->max_offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		ctx->last_page_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
+		bitKey_fromLong(&ctx->last_page_val_, arg);
 
 		return 1;
 	}
@@ -803,7 +812,8 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 		itemid = PageGetItemId(page, ctx->offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		ctx->cur_val_ = DatumGetInt64(DirectFunctionCall1(numeric_int8, arg));
+		bitKey_fromLong(&ctx->cur_val_, arg);
+
 		ctx->iptr_ = itup->t_tid;
 		return 1;
 	}
@@ -814,7 +824,7 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 
 /* test first item on the next page */
 int 
-zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, uint64 check_val)
+zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, const bitKey_t *check_val)
 {
 	/* do nothing if the cursor is not on the end of page */
 	if (ctx->offset_ < ctx->max_offset_)
@@ -824,7 +834,8 @@ zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, uint64 check_val)
 	/* test first item on the next page */
 	if (zcurve_scan_step_forward(ctx, true))
 	{
-		int ret = (ctx->next_val_ <= check_val) ? 1 : 0;
+		//int ret = (ctx->next_val_ <= check_val) ? 1 : 0;
+		int ret = (bitKey_cmp(& ctx->next_val_, check_val) <= 0) ? 1 : 0;
 		/* if it is in subquery range, return true */
 		return ret;
 	}

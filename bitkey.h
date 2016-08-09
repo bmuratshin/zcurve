@@ -10,19 +10,40 @@
 #ifndef __ZCURVE_BITKEY_H
 #define __ZCURVE_BITKEY_H
 
-/* point 2d key stuff ------------------------------------------------------------------------------- */
-struct bit2Key_s {
-	uint64 val_;
-};
-typedef struct bit2Key_s bit2Key_t;
+typedef struct bitKey_s bitKey_t;
+typedef struct zkey_vtab_s {
+	int	(*f_cmp) (const bitKey_t *, const bitKey_t *);	
+	bool	(*f_between) (const bitKey_t *val, const bitKey_t *minval, const bitKey_t *maxval);
+	int	(*f_getBit) (const bitKey_t *pk, int idx);
+	void  	(*f_clearKey) (bitKey_t *pk);
+	void	(*f_setLowBits) (bitKey_t *pk, int idx);
+	void	(*f_clearLowBits) (bitKey_t *pk, int idx);
+	void	(*f_fromLong) (bitKey_t *pk, Datum numeric);
+	Datum	(*f_toLong) (const bitKey_t *pk);
+	void	(*f_fromCoords) (bitKey_t *pk, const uint32 *coords, int n);
+	void	(*f_toCoords) (const bitKey_t *pk, uint32 *coords, int n);
+} zkey_vtab_t;
 
-extern int64 bit2Key_getBit (bit2Key_t *pk, int idx);
-extern void  bit2Key_clearKey (bit2Key_t *pk);
-extern void  bit2Key_setLowBits (bit2Key_t *pk, int idx);
-extern void  bit2Key_clearLowBits (bit2Key_t *pk, int idx);
-extern void  bit2Key_fromLong (bit2Key_t *pk, const uint64 *buffer);
-extern void  bit2Key_toLong (const bit2Key_t *pk, uint64 *buffer);
-extern void  bit2Key_fromXY (bit2Key_t *pk, uint32 x, uint32 y);
-extern void  bit2Key_toXY (bit2Key_t *pk, uint32 *x, uint32 *y);
+
+/* point 2d key stuff ------------------------------------------------------------------------------- */
+#define ZKEY_BUFLEN_BY_WORDS64 3
+#define ZKEY_MAX_COORDS 6
+typedef struct bitKey_s {
+	zkey_vtab_t 	*vtab_;
+	uint64 		vals_[ZKEY_BUFLEN_BY_WORDS64];
+} bitKey_t;
+
+extern void  bitKey_CTOR2 (bitKey_t *pk);
+
+extern int   bitKey_cmp (const bitKey_t *, const bitKey_t *);	
+extern bool  bitKey_between (const bitKey_t *val, const bitKey_t *minval, const bitKey_t *maxval);
+extern int   bitKey_getBit (const bitKey_t *pk, int idx);
+extern void  bitKey_clearKey (bitKey_t *pk);
+extern void  bitKey_setLowBits (bitKey_t *pk, int idx);
+extern void  bitKey_clearLowBits (bitKey_t *pk, int idx);
+extern void  bitKey_fromLong (bitKey_t *pk, Datum dt);  
+extern Datum bitKey_toLong (const bitKey_t *pk);
+extern void  bitKey_fromCoords (bitKey_t *pk, const uint32 *coords, int n);
+extern void  bitKey_toCoords (const bitKey_t *pk, uint32 *coords, int n);
 
 #endif /* __ZCURVE_BITKEY_H */

@@ -15,8 +15,8 @@
 
 /* subquery definition */
 typedef struct spatial2Query_s {
-	bit2Key_t lowKey_;	/* the begining of index interval */
-	bit2Key_t highKey_;	/* the end of index interval */
+	bitKey_t lowKey_;	/* the begining of index interval */
+	bitKey_t highKey_;	/* the end of index interval */
 	int curBitNum_;		/* the number of key bit that will be used to split this one to subqueries (if necessary, sure) */
 	struct spatial2Query_s *prevQuery_; 	/* pointer to subqueries queue */
 } spatial2Query_t;
@@ -30,8 +30,8 @@ typedef struct spt_query2_s {
 
 	zcurve_scan_ctx_t qctx_;		/* low level cursor context */
 
-	bit2Key_t currentKey_;			/* cursor position value, initially, left bottom corner of lookup extent */
-	bit2Key_t lastKey_;			/* the max value for currently executed subquery, initially, right upper corner of lookup extent */
+	bitKey_t currentKey_;			/* cursor position value, initially, left bottom corner of lookup extent */
+	bitKey_t lastKey_;			/* the max value for currently executed subquery, initially, right upper corner of lookup extent */
 
 	bool subQueryFinished_;			/* automata state flag */
 	ItemPointerData iptr_;			/* temporarily stored current t_tid */
@@ -71,7 +71,7 @@ extern void spt_query2_freeQuery(spt_query2_t *q, spatial2Query_t *);
 extern void spt_query2_releaseSubQuery(spt_query2_t *q);
 
 /* performs index cursor lookup for start_val */
-extern int spt_query2_queryFind(spt_query2_t *q, uint64 start_val);
+extern int spt_query2_queryFind(spt_query2_t *q, const bitKey_t *start_val);
 
 /* moves cursor forward */
 extern int spt_query2_queryNextKey(spt_query2_t *q);
