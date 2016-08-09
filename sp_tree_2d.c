@@ -454,6 +454,7 @@ p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64
 	ptr->cnt_ = 0;
 	ptr->result_ = NULL;
 	ptr->cur_ = NULL;
+
 	spt_query2_CTOR (&ptr->qdef_, ptr->relation_, x0, y0, x1, y1);
 }
 
@@ -518,6 +519,7 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 			/* prepare lookup context */
 			pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
 			p2d_ctx_t_CTOR(pctx, relname, x0, y0, x1, y1);
+
 			funcctx->user_fctx = pctx;
 
 			/* performing spatial cursor forwarding */
@@ -695,12 +697,12 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 
 /* constructing a scan context, it may be restarted later with other start_val */
 int 
-zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, const bitKey_t *start_val)
+zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel)
 {
 	Assert(ctx && start_val);
 	ctx->rel_ = rel;
-	ctx->init_zv_ =  *start_val;
-	ScanKeyInit(&ctx->skey_, 1, BTLessStrategyNumber, F_INT8LE, bitKey_toLong(start_val));
+	bitKey_CTOR2(&ctx->init_zv_);
+	ScanKeyInit(&ctx->skey_, 1, BTLessStrategyNumber, F_INT8LE, bitKey_toLong(&ctx->init_zv_));
 	ctx->offset_ = 0;
 	ctx->max_offset_ = 0;
 	bitKey_CTOR2(&ctx->cur_val_);

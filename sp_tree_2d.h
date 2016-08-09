@@ -56,7 +56,7 @@ extern OffsetNumber zcurve_binsrch_2d(zcurve_scan_ctx_t *pctx);
 extern int32 zcurve_compare_2d(zcurve_scan_ctx_t *pctx, Page page, OffsetNumber offnum);
 
 /* context constructor */
-extern int zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, const bitKey_t *start_val);
+extern int zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel);
 
 /* context destructor */
 extern int zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx);
