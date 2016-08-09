@@ -39,11 +39,11 @@ spt_query2_CTOR (spt_query2_t *ps, Relation rel, uint32 minx, uint32 miny, uint3
 	ps->maxX_ = maxx;
 	ps->maxY_ = maxy;
 
-	bitKey_CTOR2(&ps->currentKey_);			
-	bitKey_CTOR2(&ps->lastKey_);
+	bitKey_CTOR(&ps->currentKey_, 2);
+	bitKey_CTOR(&ps->lastKey_, 2);
 
 	/* tree cursor init */
-	zcurve_scan_ctx_CTOR(&ps->qctx_, rel, 0);
+	zcurve_scan_ctx_CTOR(&ps->qctx_, rel);
 }
 
 /* destructor */
@@ -70,8 +70,8 @@ spt_query2_createQuery(spt_query2_t *q)
 	ret = (spatial2Query_t *)palloc(sizeof(spatial2Query_t));
 	ret->curBitNum_ = 0;
 	ret->prevQuery_ = NULL;
-	bitKey_CTOR2(&ret->lowKey_);
-	bitKey_CTOR2(&ret->highKey_);
+	bitKey_CTOR(&ret->lowKey_, 2);
+	bitKey_CTOR(&ret->highKey_, 2);
 	return ret;
 }
 

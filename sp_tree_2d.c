@@ -701,13 +701,13 @@ zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel)
 {
 	Assert(ctx && start_val);
 	ctx->rel_ = rel;
-	bitKey_CTOR2(&ctx->init_zv_);
+	bitKey_CTOR(&ctx->init_zv_, 2);
 	ScanKeyInit(&ctx->skey_, 1, BTLessStrategyNumber, F_INT8LE, bitKey_toLong(&ctx->init_zv_));
 	ctx->offset_ = 0;
 	ctx->max_offset_ = 0;
-	bitKey_CTOR2(&ctx->cur_val_);
-	bitKey_CTOR2(&ctx->next_val_);
-	bitKey_CTOR2(&ctx->last_page_val_);
+	bitKey_CTOR(&ctx->cur_val_, 2);
+	bitKey_CTOR(&ctx->next_val_, 2);
+	bitKey_CTOR(&ctx->last_page_val_, 2);
 	ctx->buf_ = 0;
 	ctx->pstack_ = NULL;
 	return 1;

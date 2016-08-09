@@ -168,7 +168,7 @@ static zkey_vtab_t key2_vtab_ = {
 	bit2Key_toCoords,
 };
 
-void  bitKey_CTOR2 (bitKey_t *pk)
+static void  bitKey_CTOR2 (bitKey_t *pk)
 {
 	Assert(pk);
 	memset(pk->vals_, 0, sizeof(pk->vals_));
@@ -181,6 +181,18 @@ void  bitKey_CTOR2 (bitKey_t *pk)
 
 
 /*------------------------------------------------------------------------------------*/
+void  bitKey_CTOR (bitKey_t *pk, int ncoords)
+{
+	Assert(pk);
+	switch (ncoords) {
+		case 2: 
+			bitKey_CTOR2(pk);
+			break;
+		default:
+			elog(ERROR, "bitKey for %d coordinates has not been yet realized", ncoords);
+	};
+}
+
 int   bitKey_cmp (const bitKey_t *l, const bitKey_t *r)
 {
 	Assert(l && r);

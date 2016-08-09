@@ -33,8 +33,7 @@ typedef struct bitKey_s {
 	uint64 		vals_[ZKEY_BUFLEN_BY_WORDS64];
 } bitKey_t;
 
-extern void  bitKey_CTOR2 (bitKey_t *pk);
-
+extern void  bitKey_CTOR (bitKey_t *pk, int ncoords);
 extern int   bitKey_cmp (const bitKey_t *, const bitKey_t *);	
 extern bool  bitKey_between (const bitKey_t *val, const bitKey_t *minval, const bitKey_t *maxval);
 extern int   bitKey_getBit (const bitKey_t *pk, int idx);
