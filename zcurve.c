@@ -12,66 +12,38 @@
 #include "executor/spi.h"
 #include "utils/builtins.h"
 
+#include "funcapi.h"
+#include "utils/rel.h"
+#include "utils/builtins.h"
+#include "utils/fmgroids.h"
+#include "utils/builtins.h"
+#include "utils/numeric.h"
+#include "utils/lsyscache.h"
+#include "catalog/namespace.h"
+#include "access/nbtree.h"
+#include "access/htup_details.h"
+
+#include "sp_tree_2d.h"
+#include "sp_query_2d.h"
+#include "gen_list.h"
+#include "list_sort.h"
+#include "bitkey.h"
+
+
 PG_MODULE_MAGIC;
 
-uint64 zcurve_fromXY (uint32 ix, uint32 iy);
-void zcurve_toXY (uint64 al, uint32 *px, uint32 *py);
-
-static uint32 stoBits[8] = {0x0001, 0x0002, 0x0004, 0x0008, 
-                  0x0010, 0x0020, 0x0040, 0x0080};
-uint64
-zcurve_fromXY (uint32 ix, uint32 iy)
-{
-  uint64 val = 0;
-  int curmask = 0xf;
-  unsigned char *ptr = (unsigned char *)&val;
-  int i;
-  for (i = 0; i < 8; i++)
-    {
-      int xp = (ix & curmask) >> (i<<2);
-      int yp = (iy & curmask) >> (i<<2);
-      int tmp = (xp & stoBits[0]) | ((yp & stoBits[0])<<1) |
-            ((xp & stoBits[1])<<1) | ((yp & stoBits[1])<<2) |
-            ((xp & stoBits[2])<<2) | ((yp & stoBits[2])<<3) |
-            ((xp & stoBits[3])<<3) | ((yp & stoBits[3])<<4);
-      curmask <<= 4;
-      ptr[i] = (unsigned char)tmp;
-    }
-  return val;
-}
-
-void 
-zcurve_toXY (uint64 al, uint32 *px, uint32 *py)
-{
-  unsigned char *ptr = (unsigned char *)&al;
-  int ix = 0;
-  int iy = 0;
-  int i;
-
-  if (!px || !py)
-    return;
-
-  for (i = 0; i < 8; i++)
-    {
-      int tmp = ptr[i];
-      int tmpx = (tmp & stoBits[0]) + ((tmp & stoBits[2])>>1) + ((tmp & stoBits[4])>>2) + ((tmp & stoBits[6])>>3);
-      int tmpy = ((tmp & stoBits[1])>>1) + ((tmp & stoBits[3])>>2) + ((tmp & stoBits[5])>>3) + ((tmp & stoBits[7])>>4);
-      ix |= tmpx << (i << 2);
-      iy |= tmpy << (i << 2);
-    }        
-  *px = ix;
-  *py = iy;
-}
 
 PG_FUNCTION_INFO_V1(zcurve_val_from_xy);
 
 Datum
 zcurve_val_from_xy(PG_FUNCTION_ARGS)
 {
-   uint64 v1  = PG_GETARG_INT64(0);
-   uint64 v2  = PG_GETARG_INT64(1);
+   uint32 coords[ZKEY_MAX_COORDS] = {PG_GETARG_INT64(0), PG_GETARG_INT64(1) };
+   bitKey_t key;
 
-   PG_RETURN_INT64(zcurve_fromXY(v1, v2));
+   bitKey_CTOR(&key, 2);
+   bitKey_fromCoords(&key, coords, 2);
+   PG_RETURN_INT64(key.vals_[0]);
 }
 
 
@@ -80,349 +52,235 @@ PG_FUNCTION_INFO_V1(zcurve_num_from_xy);
 Datum
 zcurve_num_from_xy(PG_FUNCTION_ARGS)
 {
-   uint64 v1  = PG_GETARG_INT64(0);
-   uint64 v2  = PG_GETARG_INT64(1);
-   uint64 res  = zcurve_fromXY(v1, v2);
-   Datum result = DirectFunctionCall1(int8_numeric, res);
-   return result;
+   uint32 coords[ZKEY_MAX_COORDS] = {PG_GETARG_INT64(0), PG_GETARG_INT64(1) };
+   bitKey_t key;
+
+   bitKey_CTOR(&key, 2);
+   bitKey_fromCoords(&key, coords, 2);
+   return bitKey_toLong(&key);
 }
 
+/*
+ * Check if relation is index and has specified am oid. Trigger error if not
+ */
+static Relation
+checkOpenedRelation(Relation r, Oid PgAmOid)
+{
+	if (r->rd_am == NULL)
+		elog(ERROR, "Relation %s.%s is not an index",
+			 get_namespace_name(RelationGetNamespace(r)),
+			 RelationGetRelationName(r));
+	if (r->rd_rel->relam != PgAmOid)
+		elog(ERROR, "Index %s.%s has wrong type",
+			 get_namespace_name(RelationGetNamespace(r)),
+			 RelationGetRelationName(r));
+	return r;
+}
 
-static const int s_maxx = 1000000;
-static const int s_maxy = 1000000;
-
-#ifndef MIN
-#define MIN(a,b) ((a)<(b)?(a):(b))
+/*
+ * Open index relation with AccessShareLock.
+ */
+static Relation
+indexOpen(RangeVar *relvar)
+{
+#if PG_VERSION_NUM < 90200
+	Oid			relOid = RangeVarGetRelid(relvar, false);
+#else
+	Oid			relOid = RangeVarGetRelid(relvar, NoLock, false);
 #endif
-
-
-static int compare_uint64( const void *arg1, const void *arg2 )
-{
-  const uint64 *a = (const uint64 *)arg1;
-  const uint64 *b = (const uint64 *)arg2;
-  if (*a == *b)
-    return 0;
-  return *a > *b ? 1: -1;
+	return checkOpenedRelation(
+						   index_open(relOid, AccessShareLock), BTREE_AM_OID);
 }
 
-static SPIPlanPtr
-prep_interval_request()
+/*
+ * Close index relation opened with AccessShareLock.
+ */
+static void
+indexClose(Relation r)
 {
-	SPIPlanPtr	pplan;
-	char		sql[8192];
-	int 		nkeys = 2;
-	Oid		argtypes[2] = {INT8OID, INT8OID};	/* key types to prepare execution plan */
-	int ret =0;
-
-   	if ((ret = SPI_connect()) < 0)
-   	/* internal error */
-     	  elog(ERROR, "check_primary_key: SPI_connect returned %d", ret);
-
-	snprintf(sql, sizeof(sql), "select * from test_points where zcurve_val_from_xy(x, y) between $1 and $2");
-
-	/* Prepare plan for query */
-	pplan = SPI_prepare(sql, nkeys, argtypes);
-	if (pplan == NULL)
-	/* internal error */
-		elog(ERROR, "check_primary_key: SPI_prepare returned %d", SPI_result);
-	return pplan;
+	index_close((r), AccessShareLock);
 }
 
-static int 
-fin_interval_request(SPIPlanPtr pplan)
+/* resulting item temporarily storing for sorting */
+typedef struct res_item_s {
+	ItemPointerData iptr_;	/* pointer to rable row */
+	uint32		x_;	/* x coord */
+	uint32		y_;	/* y coord */
+	gen_list_t	link_;  /* next one */
+} res_item_t;
+
+/* in the end we need to sort found index items by t_tid*/
+static int  
+res_item_compare_proc(const void *a, const void *b, const void *arg)
 {
-   SPI_finish();
-   return 0;
-}
+	const res_item_t *l = (const res_item_t *)a;
+	const res_item_t *r = (const res_item_t *)b;
 
+	if (l->iptr_.ip_blkid.bi_hi != r->iptr_.ip_blkid.bi_hi)
+		return l->iptr_.ip_blkid.bi_hi - r->iptr_.ip_blkid.bi_hi;
 
-static int 
-run_interval_request(SPIPlanPtr pplan, uint64 v0, uint64 v1)
-{
-	Datum		values[2];	/* key types to prepare execution plan */
-	Portal 		portal;
-	int cnt = 0, i;
+	if (l->iptr_.ip_blkid.bi_lo != r->iptr_.ip_blkid.bi_lo)
+		return l->iptr_.ip_blkid.bi_lo - r->iptr_.ip_blkid.bi_lo;
 
-	values[0] = Int64GetDatum(v0);
-	values[1] = Int64GetDatum(v1);
+	if (l->iptr_.ip_posid != r->iptr_.ip_posid)
+		return l->iptr_.ip_posid - r->iptr_.ip_posid;
 
-	portal = SPI_cursor_open(NULL, pplan, values, NULL, true);
-	if (NULL == portal)
-		/* internal error */
-		elog(ERROR, "check_primary_key: SPI_cursor_open");
-	for (;;)
-	{
-		SPI_cursor_fetch(portal, true, 8);
-		if (0 == SPI_processed || NULL == SPI_tuptable)
-			break;
-		{
-			/*TupleDesc tupdesc = SPI_tuptable->tupdesc;*/
-			for (i = 0; i < SPI_processed; i++)
-			{
-				/*HeapTuple tuple = SPI_tuptable->vals[i];*/
-				/*elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2));*/
-				cnt++;
-			}
-		}
-	}
-	SPI_cursor_close(portal);
-
-	return cnt;
-}
-
-PG_FUNCTION_INFO_V1(zcurve_oids_by_extent);
-Datum
-zcurve_oids_by_extent(PG_FUNCTION_ARGS)
-{
-   SPIPlanPtr	pplan;
-
-   uint64 x0  = PG_GETARG_INT64(0);
-   uint64 y0  = PG_GETARG_INT64(1);
-   uint64 x1  = PG_GETARG_INT64(2);
-   uint64 y1  = PG_GETARG_INT64(3);
-   uint64 *ids = NULL;
-   int cnt = 0;
-   int sz = 0, ix, iy;
-
-   x0 = MIN(x0, s_maxx);
-   y0 = MIN(y0, s_maxy);
-   x1 = MIN(x1, s_maxx);
-   y1 = MIN(y1, s_maxy);
-
-   if (x0 > x1)
-     elog(ERROR, "xmin > xmax");
-   if (y0 > y1)
-     elog(ERROR, "ymin > ymax");
-
-   sz = (x1 - x0 + 1) * (y1 - y0 + 1);
-   ids = (uint64*)palloc(sz * sizeof(uint64));
-   if (NULL == ids)
-   /* internal error */
-     elog(ERROR, "cant alloc %d bytes in zcurve_oids_by_extent", sz);
-   for (ix = x0; ix <= x1; ix++)
-    for (iy = y0; iy <= y1; iy++)
-    {
-     	ids[cnt++] = zcurve_fromXY(ix, iy);
-    }
-   qsort (ids, sz, sizeof(*ids), compare_uint64);
-
-   cnt = 0;
-
-   pplan = prep_interval_request();
-   {
-/*	FILE *fl = fopen("/tmp/ttt.sql", "w");*/
-	int cur_start = 0; 
-	int ix;
-	for (ix = cur_start + 1; ix < sz; ix++)
-	{
-		if (ids[ix] != ids[ix - 1] + 1)
-		{
-			cnt += run_interval_request(pplan, ids[cur_start], ids[ix - 1]);
-/*			fprintf(fl, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld;\n", ids[cur_start], ids[ix - 1]);
-			elog(INFO, "%d -> %d (%ld -> %ld)", cur_start, ix - 1, ids[cur_start], ids[ix - 1]);
-			cnt++;*/
-			cur_start = ix;
-		}
-	}
-    	if (cur_start != ix)
-	{
-			cnt += run_interval_request(pplan, ids[cur_start], ids[ix - 1]);
-/*			fprintf(fl, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld;\n", ids[cur_start], ids[ix - 1]);
-			elog(INFO, "%d -> %d (%ld -> %ld)", cur_start, ix - 1, ids[cur_start], ids[ix - 1]);*/
-	}
-/*	fclose(fl);*/
-   }
-   fin_interval_request(pplan);
-   pfree(ids);
-
-   PG_RETURN_INT64(cnt);
-}
-
-/*------------------------------------------------------------------------------------------------ */
-
-struct interval_ctx_s {
-	SPIPlanPtr	cr_;
-	SPIPlanPtr	probe_cr_;
-	uint64 		cur_val_;
-	uint64 		top_val_;
-	FILE * 		fl_;
-};
-typedef struct interval_ctx_s interval_ctx_t;
-
-int prep_interval_request_ii(interval_ctx_t *ctx);
-int run_interval_request_ii(interval_ctx_t *ctx, uint64 v0, uint64 v1);
-int probe_interval_request_ii(interval_ctx_t *ctx, uint64 v0);
-int fin_interval_request_ii(interval_ctx_t *ctx);
-
-
-int prep_interval_request_ii(interval_ctx_t *ctx)
-{
-	char		sql[8192];
-	int 		nkeys = 2;
-	Oid		argtypes[2] = {INT8OID, INT8OID};	/* key types to prepare execution plan */
-	int ret =0;
-
-   	if ((ret = SPI_connect()) < 0)
-   	/* internal error */
-     	  elog(ERROR, "check_primary_key: SPI_connect returned %d", ret);
-
-	snprintf(sql, sizeof(sql), "select * from test_points where zcurve_val_from_xy(x, y) between $1 and $2");
-	ctx->cr_ = SPI_prepare(sql, nkeys, argtypes);
-	if (ctx->cr_ == NULL)
-	/* internal error */
-		elog(ERROR, "check_primary_key: SPI_prepare returned %d", SPI_result);
-
-	snprintf(sql, sizeof(sql), "select * from test_points where zcurve_val_from_xy(x, y) between $1 and %ld order by zcurve_val_from_xy(x::int4, y::int4) limit 1", ctx->top_val_);
-	ctx->probe_cr_ = SPI_prepare(sql, 1, argtypes);
-	if (ctx->probe_cr_ == NULL)
-	/* internal error */
-		elog(ERROR, "check_primary_key: SPI_prepare returned %d", SPI_result);
-
-	return 1;
-}
-
-int 
-probe_interval_request_ii(interval_ctx_t *ctx, uint64 v0)
-{
-	Datum		values[1];	/* key types to prepare execution plan */
-	Portal 		portal;
-
-	values[0] = Int64GetDatum(v0);
-
-	if (ctx->fl_)
-		fprintf(ctx->fl_, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld order by zcurve_val_from_xy(x::int4, y::int4) limit 1;\n", v0, ctx->top_val_);
-	portal = SPI_cursor_open(NULL, ctx->probe_cr_, values, NULL, true);
-	if (NULL == portal)
-		/* internal error */
-		elog(ERROR, "check_primary_key: SPI_cursor_open");
-	{
-		SPI_cursor_fetch(portal, true, 1);
-		if (0 != SPI_processed && NULL != SPI_tuptable)
-		{
-			TupleDesc tupdesc = SPI_tuptable->tupdesc;
-
-			bool isnull;
-			HeapTuple tuple = SPI_tuptable->vals[0];
-			Datum dx, dy;
-			uint64 zv = 0;
-			dx = SPI_getbinval(tuple, tupdesc, 1, &isnull);
-			dy = SPI_getbinval(tuple, tupdesc, 2, &isnull);
-			zv = zcurve_fromXY(DatumGetInt64(dx), DatumGetInt64(dy));
-/*			elog(INFO, "%ld %ld -> %ld", DatumGetInt64(dx), DatumGetInt64(dy), zv); */
-
-			ctx->cur_val_ = zv;
-			SPI_cursor_close(portal);
-			return 1;
-		}
-		SPI_cursor_close(portal);
-	}
 	return 0;
 }
 
+/* SRF-resistent context */
+typedef struct p2d_ctx_s {
+	Relation    	relation_;	/* index tree */
+	spt_query2_t 	qdef_;		/* spatial query definition */
+	gen_list_t 	*result_;	/* head og resulting list */
+	gen_list_t 	*cur_;		/* current item for out */
+	int 		cnt_;		/* resulting list length */
+} p2d_ctx_t;
 
-int 
-run_interval_request_ii(interval_ctx_t *ctx, uint64 v0, uint64 v1)
+
+/* constructor */
+static void 
+p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint32 x0, uint32 y0, uint32 x1, uint64 y1)
 {
-	Datum		values[2];	/* key types to prepare execution plan */
-	Portal 		portal;
-	int cnt = 0, i;
+	uint32 min_coords[ZKEY_MAX_COORDS] = {x0, y0};
+	uint32 max_coords[ZKEY_MAX_COORDS] = {x1, y1};
 
-	values[0] = Int64GetDatum(v0);
-	values[1] = Int64GetDatum(v1);
+	List	   *relname_list;
+	RangeVar   *relvar;
 
-	if (ctx->fl_)
-		fprintf(ctx->fl_, "EXPLAIN (ANALYZE,BUFFERS) select * from test_points where zcurve_val_from_xy(x, y) between %ld and %ld;\n", v0, v1);
-	portal = SPI_cursor_open(NULL, ctx->cr_, values, NULL, true);
-	if (NULL == portal)
-		/* internal error */
-		elog(ERROR, "check_primary_key: SPI_cursor_open");
-	for (;;)
-	{
-		SPI_cursor_fetch(portal, true, 8);
-		if (0 == SPI_processed || NULL == SPI_tuptable)
-			break;
-		{
-			/*TupleDesc tupdesc = SPI_tuptable->tupdesc;*/
-			for (i = 0; i < SPI_processed; i++)
-			{
-				/*HeapTuple tuple = SPI_tuptable->vals[i];*/
-				/*elog(INFO, "%s, %s", SPI_getvalue(tuple, tupdesc, 1), SPI_getvalue(tuple, tupdesc, 2)); */
-				cnt++;
-			}
-		}
-	}
-	SPI_cursor_close(portal);
+	Assert(ptr);
 
-	return cnt;
+	relname_list = stringToQualifiedNameList(relname);
+	relvar = makeRangeVarFromNameList(relname_list);
+	ptr->relation_ = indexOpen(relvar);
+	ptr->cnt_ = 0;
+	ptr->result_ = NULL;
+	ptr->cur_ = NULL;
+
+	spt_query2_CTOR (&ptr->qdef_, ptr->relation_, min_coords, max_coords, 2);
+}
+
+/* destructor */
+static void 
+p2d_ctx_t_DTOR(p2d_ctx_t *ptr)
+{
+	Assert(ptr);
+	indexClose(ptr->relation_);
+	ptr->relation_ = NULL;
+	ptr->result_ = NULL;
+	ptr->cur_ = NULL;
+	spt_query2_DTOR (&ptr->qdef_);
 }
 
 
-PG_FUNCTION_INFO_V1(zcurve_oids_by_extent_ii);
+PG_FUNCTION_INFO_V1(zcurve_2d_lookup);
 Datum
-zcurve_oids_by_extent_ii(PG_FUNCTION_ARGS)
+zcurve_2d_lookup(PG_FUNCTION_ARGS)
 {
-   uint64 x0  = PG_GETARG_INT64(0);
-   uint64 y0  = PG_GETARG_INT64(1);
-   uint64 x1  = PG_GETARG_INT64(2);
-   uint64 y1  = PG_GETARG_INT64(3);
-   uint64 *ids = NULL;
-   int cnt = 0;
-   int sz = 0, ix, iy;
-   interval_ctx_t ctx;
+	/* SRF stuff */
+	FuncCallContext     *funcctx = NULL;
+	TupleDesc            tupdesc;
+	AttInMetadata       *attinmeta;
+	p2d_ctx_t 	    *pctx = NULL;
 
-   x0 = MIN(x0, s_maxx);
-   y0 = MIN(y0, s_maxy);
-   x1 = MIN(x1, s_maxx);
-   y1 = MIN(y1, s_maxy);
+	/* params */
+	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
+  	uint64 x0  = PG_GETARG_INT64(1);
+	uint64 y0  = PG_GETARG_INT64(2);
+	uint64 x1  = PG_GETARG_INT64(3);
+	uint64 y1  = PG_GETARG_INT64(4);
 
-   if (x0 > x1)
-     elog(ERROR, "xmin > xmax");
-   if (y0 > y1)
-     elog(ERROR, "ymin > ymax");
-
-   sz = (x1 - x0 + 1) * (y1 - y0 + 1);
-   ids = (uint64*)palloc(sz * sizeof(uint64));
-   if (NULL == ids)
-   /* internal error */
-     elog(ERROR, "can't alloc %d bytes in zcurve_oids_by_extent_ii", sz);
-   for (ix = x0; ix <= x1; ix++)
-     for (iy = y0; iy <= y1; iy++)
-     {
-     	ids[cnt++] = zcurve_fromXY(ix, iy);
-     }
-   qsort (ids, sz, sizeof(*ids), compare_uint64);
-
-   ctx.top_val_ = ids[sz - 1];
-   ctx.cur_val_ = 0;
-   ctx.cr_ = NULL;
-   ctx.probe_cr_ = NULL;
-   ctx.fl_ = NULL;/*fopen("/tmp/ttt.sql", "w"); */
-   
-   cnt = 0;
-
-   prep_interval_request_ii(&ctx);
-   {
-	int cur_start = 0; 
-	int ix;
-	for (ix = cur_start + 1; ix < sz; ix++)
+	if (SRF_IS_FIRSTCALL())
 	{
-		if (0 == probe_interval_request_ii(&ctx, ids[cur_start]))
-			break;
-		for (; cur_start < sz && ids[cur_start] < ctx.cur_val_; cur_start++);
+		MemoryContext   oldcontext;
+		funcctx = SRF_FIRSTCALL_INIT();
 
-		ix = cur_start + 1;
-                if (ix >= sz)
-			break;
-		for (; ix < sz && ids[ix] == ids[ix - 1] + 1; ix++);
+		/* recordset cosists of 3 columns - t_tid & coordinates */
+		tupdesc = CreateTemplateTupleDesc(3, false);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "ctid", TIDOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "x", INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "y", INT4OID, -1, 0);
 
-		cnt += run_interval_request_ii(&ctx, ids[cur_start], ids[ix - 1]);
-		cur_start = ix;
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+		funcctx->max_calls = 1000000;
+
+		if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+			ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("function returning record called in context "
+				"that cannot accept type record")));
+
+		attinmeta = TupleDescGetAttInMetadata(tupdesc);
+		funcctx->attinmeta = attinmeta;
+		/* lets start lookup, storing intermediate data in context list */
+		{
+			int 		ret;
+			uint32 coords[ZKEY_MAX_COORDS];
+			ItemPointerData iptr;
+
+			/* prepare lookup context */
+			pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
+			p2d_ctx_t_CTOR(pctx, relname, x0, y0, x1, y1);
+
+			funcctx->user_fctx = pctx;
+
+			/* performing spatial cursor forwarding */
+			ret = spt_query2_moveFirst(&pctx->qdef_, coords, &iptr);
+			while (ret)
+			{
+				res_item_t *pit = (res_item_t *)palloc(sizeof(res_item_t));
+				pit->x_ = coords[0];
+				pit->y_ = coords[1];
+				pit->iptr_ = iptr;
+				pit->link_.data = pit;
+				pit->link_.next = pctx->result_;
+				pctx->result_ = &pit->link_;
+
+				pctx->cnt_++;
+				ret = spt_query2_moveNext(&pctx->qdef_, coords, &iptr);
+			}
+			/* sort temporary data */
+			pctx->result_ = list_sort (pctx->result_,  res_item_compare_proc, NULL);
+			pctx->cur_ = pctx->result_;
+		}
+		MemoryContextSwitchTo(oldcontext);
 	}
-   }
-   if (ctx.fl_)
-   	fclose(ctx.fl_);
-   fin_interval_request(NULL);
-   pfree(ids);
 
-   PG_RETURN_INT64(cnt);
+	PG_FREE_IF_COPY(relname, 0);
+	funcctx = SRF_PERCALL_SETUP();
+	pctx = (p2d_ctx_t *) funcctx->user_fctx;
+
+	attinmeta = funcctx->attinmeta;
+
+	{
+		Datum		datums[3];
+		bool		nulls[3];
+	        HeapTuple    	htuple;
+	        Datum        	result;
+		/* while the end of result list is not reached */
+		if (pctx->cur_)
+		{
+			res_item_t *pit = (res_item_t *)(pctx->cur_->data);
+			datums[0] = PointerGetDatum(&pit->iptr_);
+			datums[1] = Int32GetDatum(pit->x_);
+			datums[2] = Int32GetDatum(pit->y_);
+			pctx->cur_ = pctx->cur_->next;
+
+			nulls[0] = false;
+			nulls[1] = false;
+			nulls[2] = false;
+
+			htuple = heap_formtuple(attinmeta->tupdesc, datums, nulls);
+			result = TupleGetDatum(funcctx, htuple);
+			SRF_RETURN_NEXT(funcctx, result);
+		}
+		else
+		{
+			/* no more data, free resources and stop lookup */
+			p2d_ctx_t_DTOR(pctx);
+		}	
+	}
+	pfree(pctx);
+	SRF_RETURN_DONE(funcctx);
 }
+

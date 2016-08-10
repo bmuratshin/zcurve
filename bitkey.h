@@ -10,6 +10,7 @@
 #ifndef __ZCURVE_BITKEY_H
 #define __ZCURVE_BITKEY_H
 
+
 typedef struct bitKey_s bitKey_t;
 typedef struct zkey_vtab_s {
 	int	(*f_cmp) (const bitKey_t *, const bitKey_t *);	

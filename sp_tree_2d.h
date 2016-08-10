@@ -12,12 +12,6 @@
 
 #include "bitkey.h"
 
-/* converts coordinates to z-value*/
-extern uint64 zcurve_fromXY (uint32 ix, uint32 iy);
-
-/* splits z-value back to coordinates */
-extern void zcurve_toXY (uint64 al, uint32 *px, uint32 *py);
-
 /* the definition struct for zcurve subqery cursor */
 typedef struct zcurve_scan_ctx_s {
 	Relation 	rel_;		/* index tree */

@@ -12,9 +12,6 @@
 #include "utils/builtins.h"
 #include "bitkey.h"
 
-
-
-
 /* 2D -------------------------------------------------------------------------------------------------------- */
 
 static uint32 stoBits[8] = {
@@ -177,6 +174,73 @@ static void  bitKey_CTOR2 (bitKey_t *pk)
 
 
 /* 3D -------------------------------------------------------------------------------------------------------- */
+/* converts coordinates to z-value*/
+extern void xyz2zv(uint32 x, uint32 y, uint32 z, uint64 *out);
+
+
+/* splits z-value back to coordinates */
+extern void zv2xyz(const uint64 *zv, uint32 *x, uint32 *y, uint32 *z);
+
+static uint32 key3ToBits[16] = {
+	0, 1, 1 << 3, 1 | (1 << 3),
+	(1 << 6), (1 << 6) | 1, (1 << 6) | (1 << 3), 1 | (1 << 3) | (1 << 6),
+	(1 << 9), (1 << 9) | 1, (1 << 9) | (1 << 3), 1 | (1 << 3) | (1 << 9),
+	(1 << 6) | (1 << 9), (1 << 6) | (1 << 9) | 1, (1 << 9) | (1 << 6) | (1 << 3), 1 | (1 << 3) | (1 << 6) | (1 << 9),
+};
+
+void xyz2zv(uint32 x, uint32 y, uint32 z, uint64 *out)
+{
+	int ix0, ix1, i;
+	out[0] = out[1] = 0;
+	for (i = 0; i < 8; i++)
+	{
+		uint64 tmp = 
+			(key3ToBits[x & 0xf] << 2) | 
+			(key3ToBits[y & 0xf] << 1) | 
+			(key3ToBits[z & 0xf]);
+		ix0 = (i * 12);
+		out[0] |= tmp << ix0;
+		ix1 = ix0 + 12;
+		out[1] |= (ix1 >> 6) * (ix0 >= 64 ? 
+						(tmp << (ix0 - 64)) :
+						(tmp >> (64 - ix0)));
+		x >>= 4; y >>= 4; z >>= 4;
+	}
+}
+
+void zv2xyz(const uint64 *zv, uint32 *x, uint32 *y, uint32 *z)
+{
+	int i;
+	uint64 vals[2] = {zv[0], zv[1]};
+	*x = *y = *z = 0;
+	/* 8 X 4 */
+	for (i = 0; i < 8; i++)
+	{
+		uint32 tmp = vals[0] & 0xfff;
+		uint32 tmpz = (tmp & 1) +
+			((tmp & (1 << 3)) >> 2) +
+			((tmp & (1 << 6)) >> 4) +
+			((tmp & (1 << 9)) >> 6);
+
+		uint32 tmpy = ((tmp & (1 << 1)) >> 1) +
+			((tmp & (1 << 4)) >> 3) +
+			((tmp & (1 << 7)) >> 5) +
+			((tmp & (1 << 10)) >> 7);
+
+		uint32 tmpx = ((tmp & (1 << 2)) >> 2) +
+			((tmp & (1 << 5)) >> 4) +
+			((tmp & (1 << 8)) >> 6) +
+			((tmp & (1 << 11)) >> 8);
+
+		*x |= tmpx << (i << 2);
+		*y |= tmpy << (i << 2);
+		*z |= tmpz << (i << 2);
+
+		vals[0] >>= 12;
+		vals[0] |= (0xfff & vals[1]) << (64 - 12);
+		vals[1] >>= 12;
+	}
+}
 
 
 
