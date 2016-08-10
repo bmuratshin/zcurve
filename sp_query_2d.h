@@ -23,7 +23,9 @@ typedef struct spatial2Query_s {
 
 /* top level spatial query definition */
 typedef struct spt_query2_s {
-	uint32 minX_, minY_, maxX_, maxY_;	/* lookup extent, debug only */
+	uint32 min_point_[ZKEY_MAX_COORDS];	/* lookup extent left bottom corner, debug only */
+	uint32 max_point_[ZKEY_MAX_COORDS];	/* lookup extent upper right corner, debug only */
+	int ncoords_;
 
 	spatial2Query_t *queryHead_;		/* subqueries queue */
 	spatial2Query_t *freeHead_;		/* finished subqueries are reused */
@@ -38,7 +40,7 @@ typedef struct spt_query2_s {
 } spt_query2_t;
 
 /* constructor */
-extern void spt_query2_CTOR (spt_query2_t *ps, Relation rel, uint32 minx, uint32 miny, uint32 maxx, uint32 maxy);
+extern void spt_query2_CTOR (spt_query2_t *ps, Relation rel, uint32 *min_coords, uint32 *max_coords, int ncoords);
 
 /* destructor */
 extern void spt_query2_DTOR (spt_query2_t *ps);
@@ -49,10 +51,10 @@ extern void spt_query2_DTOR (spt_query2_t *ps);
 /* public interface -------------------------------------- */
 
 /* spatial cursor start, returns not 0 in case of cuccess, resulting data in x,y,iptr */
-extern int  spt_query2_moveFirst(spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData *iptr);
+extern int  spt_query2_moveFirst(spt_query2_t *q, uint32 *coorsd, ItemPointerData *iptr);
 
 /* main loop iteration, returns not 0 in case of cuccess, resulting data in x,y,iptr */
-extern int  spt_query2_moveNext(spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData *iptr);
+extern int  spt_query2_moveNext(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr);
 
 
 
@@ -81,10 +83,10 @@ extern int spt_query2_queryNextKey(spt_query2_t *q);
   split it if necessary till the full satisfaction and then 
   test for an appropriate data
 */
-extern int spt_query2_findNextMatch(spt_query2_t *q, uint32 *x, uint32 * y, ItemPointerData *iptr);
+extern int spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr);
 
 /* split current cursor value back to x & y and check it complies to query extent */
-extern int spt_query2_checkKey(spt_query2_t *q, uint32 *x, uint32 * y);
+extern int spt_query2_checkKey(spt_query2_t *q, uint32 *coords);
 
 /* 
   If cursor points not to the end of page just return OK.

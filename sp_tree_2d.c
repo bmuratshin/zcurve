@@ -90,8 +90,6 @@ zcurve_compare_2d(
 	BTPageOpaque opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 	IndexTuple	itup;
 	int		i;
-	//uint64		cmpval;
-	//cmpval = DatumGetInt64(pctx->skey_.sk_argument);
 	/*
 	 * Force result ">" if target item is first data item on an internal page
 	 * --- see NOTE above.
@@ -117,13 +115,9 @@ zcurve_compare_2d(
 	{
 		Datum		datum;
 		bool		isNull;
-		//uint64		keyval;
 		int cmp;
-		//void 		*nm;
 
 		datum = index_getattr(itup, i, itupdesc, &isNull);
-		//nm = DatumGetNumeric(datum);
-
 		cmp = DatumGetInt32(
 			DirectFunctionCall2(
 				numeric_cmp,
@@ -131,11 +125,6 @@ zcurve_compare_2d(
 				datum));
 		if (cmp)
 			return cmp;
-		//keyval = DatumGetInt64(DirectFunctionCall1(numeric_int8, datum));//DatumGetInt64(datum);
-		//if (keyval != cmpval)
-		//{
-		//	return keyval > cmpval ? -1 : 1;
-		//}
 	}
 	return 0;
 }
@@ -441,8 +430,11 @@ typedef struct p2d_ctx_s {
 
 /* constructor */
 static void 
-p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64 x1, uint64 y1)
+p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint32 x0, uint32 y0, uint32 x1, uint64 y1)
 {
+	uint32 min_coords[ZKEY_MAX_COORDS] = {x0, y0};
+	uint32 max_coords[ZKEY_MAX_COORDS] = {x1, y1};
+
 	List	   *relname_list;
 	RangeVar   *relvar;
 
@@ -455,7 +447,7 @@ p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint64 x0, uint64 y0, uint64
 	ptr->result_ = NULL;
 	ptr->cur_ = NULL;
 
-	spt_query2_CTOR (&ptr->qdef_, ptr->relation_, x0, y0, x1, y1);
+	spt_query2_CTOR (&ptr->qdef_, ptr->relation_, min_coords, max_coords, 2);
 }
 
 /* destructor */
@@ -513,7 +505,7 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		/* lets start lookup, storing intermediate data in context list */
 		{
 			int 		ret;
-			uint32 		x, y;
+			uint32 coords[ZKEY_MAX_COORDS];
 			ItemPointerData iptr;
 
 			/* prepare lookup context */
@@ -523,19 +515,19 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 			funcctx->user_fctx = pctx;
 
 			/* performing spatial cursor forwarding */
-			ret = spt_query2_moveFirst(&pctx->qdef_, &x, &y, &iptr);
+			ret = spt_query2_moveFirst(&pctx->qdef_, coords, &iptr);
 			while (ret)
 			{
 				res_item_t *pit = (res_item_t *)palloc(sizeof(res_item_t));
-				pit->x_ = x;
-				pit->y_ = y;
+				pit->x_ = coords[0];
+				pit->y_ = coords[1];
 				pit->iptr_ = iptr;
 				pit->link_.data = pit;
 				pit->link_.next = pctx->result_;
 				pctx->result_ = &pit->link_;
 
 				pctx->cnt_++;
-				ret = spt_query2_moveNext(&pctx->qdef_, &x, &y, &iptr);
+				ret = spt_query2_moveNext(&pctx->qdef_, coords, &iptr);
 			}
 			/* sort temporary data */
 			pctx->result_ = list_sort (pctx->result_,  res_item_compare_proc, NULL);
@@ -836,7 +828,6 @@ zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, const bitKey_t *check_val)
 	/* test first item on the next page */
 	if (zcurve_scan_step_forward(ctx, true))
 	{
-		//int ret = (ctx->next_val_ <= check_val) ? 1 : 0;
 		int ret = (bitKey_cmp(& ctx->next_val_, check_val) <= 0) ? 1 : 0;
 		/* if it is in subquery range, return true */
 		return ret;
