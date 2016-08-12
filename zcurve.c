@@ -60,6 +60,29 @@ zcurve_num_from_xy(PG_FUNCTION_ARGS)
    return bitKey_toLong(&key);
 }
 
+
+PG_FUNCTION_INFO_V1(zcurve_num_from_xyz);
+
+Datum
+zcurve_num_from_xyz(PG_FUNCTION_ARGS)
+{
+   uint32 coords[ZKEY_MAX_COORDS] = {PG_GETARG_INT64(0), PG_GETARG_INT64(1),  PG_GETARG_INT64(2)};
+   bitKey_t key;
+   Datum ret;
+
+   bitKey_CTOR(&key, 3);
+   bitKey_fromCoords(&key, coords, 3);
+   ret = bitKey_toLong(&key);
+#if 0
+   bitKey_fromLong(&key, ret);
+   coords[0] = coords[1] = coords[2] = 0;
+   bitKey_toCoords(&key, coords, 3);
+   elog(INFO, "%d %d %d", coords[0], coords[1], coords[2]);
+#endif
+   return ret;
+}
+
+
 /*
  * Check if relation is index and has specified am oid. Trigger error if not
  */

@@ -282,18 +282,39 @@ bit3Key_clearLowBits(bitKey_t *pk, int idx)
 	}
 }
 
+
 static void
 bit3Key_fromLong(bitKey_t *pk, Datum dt)
 {
+	Datum		divisor_numeric;
+	Datum		divisor_int64;
+	Datum		low_result;
+	Datum		upper_result;
+
 	Assert(NULL != pk);
-	pk->vals_[0] = 0;// DatumGetInt64(DirectFunctionCall1(numeric_int8, dt));
+
+	divisor_int64 = Int64GetDatum((int64) (1ULL << 48));
+	divisor_numeric = DirectFunctionCall1(int8_numeric, divisor_int64);
+
+	low_result = DirectFunctionCall2(numeric_mod, dt, divisor_numeric);
+	upper_result = DirectFunctionCall2(numeric_div_trunc, dt, divisor_numeric);
+	pk->vals_[0] = DatumGetInt64(DirectFunctionCall1(numeric_int8, low_result));
+	pk->vals_[1] = DatumGetInt64(DirectFunctionCall1(numeric_int8, upper_result));
+	pk->vals_[0] |= (pk->vals_[1] & 0xffff) << 48;
+	pk->vals_[1] >>= 16;
 }
 
 static Datum
 bit3Key_toLong(const bitKey_t *pk)
 {
-	Datum nm = NULL;// DirectFunctionCall1(int8_numeric, Int64GetDatum(pk->vals_[0]));
-	return nm;
+	uint64 lo = pk->vals_[0] & 0xffffffffffff;
+	uint64 hi = (pk->vals_[0] >> 48) | (pk->vals_[1] << 16);
+	uint64 mul = 1ULL << 48;
+	Datum  low_result = DirectFunctionCall1(int8_numeric, Int64GetDatum(lo));
+	Datum  upper_result = DirectFunctionCall1(int8_numeric, Int64GetDatum(hi));
+	Datum  mul_result = DirectFunctionCall1(int8_numeric, Int64GetDatum(mul));
+	Datum nm = DirectFunctionCall2(numeric_mul, mul_result, upper_result);
+	return  DirectFunctionCall2(numeric_add, nm, low_result);
 }
 
 
