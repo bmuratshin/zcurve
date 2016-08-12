@@ -7,6 +7,7 @@
  *
  * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
  */
+
 #include "postgres.h"
 #include "utils/numeric.h"
 #include "utils/builtins.h"
@@ -32,7 +33,7 @@ bit2Key_between (const bitKey_t *ckey, const bitKey_t *lKey, const bitKey_t *hKe
 	/* bit over bit */
   	uint64 bitMask = 0xAAAAAAAAAAAAAAAAULL;
 	int i;
-	Assert(val && minval && maxval);
+	Assert(ckey && lKey && hKey);
 
 	/* by X & Y */
 	for(i = 0; i < 2; i++, bitMask >>= 1)
@@ -120,7 +121,7 @@ bit2Key_toCoords (const bitKey_t *pk, uint32 *coords, int n)
 static void 
 bit2Key_setLowBits(bitKey_t *pk, int idx)
 {
-	uint64 bitMask = 0xAAAAAAAAAAAAAAAALL >> (63 - idx);
+	uint64 bitMask = 0xAAAAAAAAAAAAAAAAULL >> (63 - idx);
 	uint64 bit = ((uint64) 1) << ((uint64) (idx & 0x3f));
 	Assert(NULL != pk);
 	pk->vals_[0] |= bitMask;
@@ -130,7 +131,7 @@ bit2Key_setLowBits(bitKey_t *pk, int idx)
 static void 
 bit2Key_clearLowBits(bitKey_t *pk, int idx)
 {
-	uint64 bitMask = 0xAAAAAAAAAAAAAAAALL >> (63 - idx);
+	uint64 bitMask = 0xAAAAAAAAAAAAAAAAULL >> (63 - idx);
 	uint64 bit = ((uint64) 1) << ((uint64) (idx & 0x3f));
 	Assert(NULL != pk);
 	pk->vals_[0] &= ~bitMask;
@@ -174,12 +175,128 @@ static void  bitKey_CTOR2 (bitKey_t *pk)
 
 
 /* 3D -------------------------------------------------------------------------------------------------------- */
-/* converts coordinates to z-value*/
-extern void xyz2zv(uint32 x, uint32 y, uint32 z, uint64 *out);
+
+static int
+bit3Key_cmp(const bitKey_t *pl, const bitKey_t *pr)
+{
+	Assert(pl && pr);
+	if ((pl->vals_[0] != pr->vals_[0]))
+		return ((pl->vals_[0] > pr->vals_[0]) ? 1 : -1);
+	if ((pl->vals_[1] != pr->vals_[1]))
+		return ((pl->vals_[1] > pr->vals_[1]) ? 1 : -1);
+	return 0;
+}
+
+static bool
+bit3Key_between(const bitKey_t *ckey, const bitKey_t *lKey, const bitKey_t *hKey)
+{
+	/* bit over bit */
+	uint64 bitMask = 0x0000924924924924ULL;
+	int i;
+	Assert(ckey && lKey && hKey);
+
+	/* by X & Y & Z*/
+	for (i = 0; i < 3; i++, bitMask >>= 1)
+	{
+		/* current coordinate */
+		uint64 tmpK = ckey->vals_[0] & bitMask;
+		/* diapason High and Low coordinates */
+		uint64 tmpL = lKey->vals_[0] & bitMask;
+		uint64 tmpH = hKey->vals_[0] & bitMask;
+
+		if (tmpK < tmpL)
+			return 0;
+		if (tmpK > tmpH)
+			return 0;
+
+		tmpK = ((ckey->vals_[0] >> 48) | (ckey->vals_[1] << 16)) & bitMask;
+		/* diapason High and Low coordinates */
+		tmpL = ((lKey->vals_[0] >> 48) | (lKey->vals_[1] << 16)) & bitMask;
+		tmpH = ((hKey->vals_[0] >> 48) | (hKey->vals_[1] << 16)) & bitMask;
+
+		if (tmpK < tmpL)
+			return 0;
+		if (tmpK > tmpH)
+			return 0;
+	}
+	/* OK, return true */
+	return 1;
+}
+
+static int
+bit3Key_getBit(const bitKey_t *pk, int idx)
+{
+	int ix0 = idx >> 6; 
+	int ix1 = idx & 0x3f;
+	Assert(NULL != pk && idx < 96 && idx >= 0);
+	return (int)(pk->vals_[ix0] >> ix1);
+}
+
+static void
+bit3Key_clearKey(bitKey_t *pk)
+{
+	Assert(NULL != pk);
+	pk->vals_[0] = 0;
+	pk->vals_[1] = 0;
+}
+
+static const uint64 smasks[3] = {
+	0x9249249249249249ULL,
+	0x2492492492492492ULL,
+	0x4924924924924924ULL,
+};
+
+static void
+bit3Key_setLowBits(bitKey_t *pk, int idx)
+{
+	Assert(NULL != pk && idx < 96 && idx >= 0);
+	if (idx >= 64)
+	{
+		unsigned lidx = (idx - 64) & 0x3ff;
+		pk->vals_[1] |= (smasks[0] >> (63 - lidx));
+		pk->vals_[1] -= (1ULL << lidx);
+		pk->vals_[0] |= smasks[idx % 3];
+	}
+	else
+	{
+		pk->vals_[0] |= (smasks[0] >> (63 - idx));
+		pk->vals_[0] -= (1ULL << idx);
+	}
+}
+
+static void
+bit3Key_clearLowBits(bitKey_t *pk, int idx)
+{
+	Assert(NULL != pk && idx < 96 && idx >= 0);
+	if (idx >= 64)
+	{
+		unsigned lidx = (idx - 64) & 0x3ff;
+		pk->vals_[1] &= ~(smasks[0] >> (63 - lidx));
+		pk->vals_[1] |= (1ULL << lidx);
+		pk->vals_[0] &= ~smasks[idx % 3];
+	}
+	else
+	{
+		pk->vals_[0] &= ~(smasks[0] >> (63 - idx));
+		pk->vals_[0] |= (1ULL << idx);
+	}
+}
+
+static void
+bit3Key_fromLong(bitKey_t *pk, Datum dt)
+{
+	Assert(NULL != pk);
+	pk->vals_[0] = 0;// DatumGetInt64(DirectFunctionCall1(numeric_int8, dt));
+}
+
+static Datum
+bit3Key_toLong(const bitKey_t *pk)
+{
+	Datum nm = NULL;// DirectFunctionCall1(int8_numeric, Int64GetDatum(pk->vals_[0]));
+	return nm;
+}
 
 
-/* splits z-value back to coordinates */
-extern void zv2xyz(const uint64 *zv, uint32 *x, uint32 *y, uint32 *z);
 
 static uint32 key3ToBits[16] = {
 	0, 1, 1 << 3, 1 | (1 << 3),
@@ -188,31 +305,40 @@ static uint32 key3ToBits[16] = {
 	(1 << 6) | (1 << 9), (1 << 6) | (1 << 9) | 1, (1 << 9) | (1 << 6) | (1 << 3), 1 | (1 << 3) | (1 << 6) | (1 << 9),
 };
 
-void xyz2zv(uint32 x, uint32 y, uint32 z, uint64 *out)
+static void
+bit3Key_fromCoords(bitKey_t *pk, const uint32 *coords, int n)
 {
+	uint32 x = coords[0];
+	uint32 y = coords[1];
+	uint32 z = coords[2];
 	int ix0, ix1, i;
-	out[0] = out[1] = 0;
+
+	Assert(pk && coords && n >= 3);
+	pk->vals_[0] = pk->vals_[1] = 0;
 	for (i = 0; i < 8; i++)
 	{
-		uint64 tmp = 
-			(key3ToBits[x & 0xf] << 2) | 
-			(key3ToBits[y & 0xf] << 1) | 
+		uint64 tmp =
+			(key3ToBits[x & 0xf] << 2) |
+			(key3ToBits[y & 0xf] << 1) |
 			(key3ToBits[z & 0xf]);
 		ix0 = (i * 12);
-		out[0] |= tmp << ix0;
+		pk->vals_[0] |= tmp << ix0;
 		ix1 = ix0 + 12;
-		out[1] |= (ix1 >> 6) * (ix0 >= 64 ? 
-						(tmp << (ix0 - 64)) :
-						(tmp >> (64 - ix0)));
+		pk->vals_[1] |= (ix1 >> 6) * (ix0 >= 64 ?
+			(tmp << (ix0 - 64)) :
+			(tmp >> (64 - ix0)));
 		x >>= 4; y >>= 4; z >>= 4;
 	}
 }
 
-void zv2xyz(const uint64 *zv, uint32 *x, uint32 *y, uint32 *z)
+static void
+bit3Key_toCoords(const bitKey_t *pk, uint32 *coords, int n)
 {
 	int i;
-	uint64 vals[2] = {zv[0], zv[1]};
-	*x = *y = *z = 0;
+	uint64 vals[2] = { pk->vals_[0], pk->vals_[1] };
+	uint32 x = 0, y = 0, z = 0;
+
+	Assert(pk && coords && n >= 3);
 	/* 8 X 4 */
 	for (i = 0; i < 8; i++)
 	{
@@ -232,16 +358,38 @@ void zv2xyz(const uint64 *zv, uint32 *x, uint32 *y, uint32 *z)
 			((tmp & (1 << 8)) >> 6) +
 			((tmp & (1 << 11)) >> 8);
 
-		*x |= tmpx << (i << 2);
-		*y |= tmpy << (i << 2);
-		*z |= tmpz << (i << 2);
+		x |= tmpx << (i << 2);
+		y |= tmpy << (i << 2);
+		z |= tmpz << (i << 2);
 
 		vals[0] >>= 12;
 		vals[0] |= (0xfff & vals[1]) << (64 - 12);
 		vals[1] >>= 12;
 	}
+	coords[0] = x;
+	coords[1] = y;
+	coords[2] = z;
 }
 
+static zkey_vtab_t key3_vtab_ = {
+	bit3Key_cmp,
+	bit3Key_between,
+	bit3Key_getBit,
+	bit3Key_clearKey,
+	bit3Key_setLowBits,
+	bit3Key_clearLowBits,
+	bit3Key_fromLong,
+	bit3Key_toLong,
+	bit3Key_fromCoords,
+	bit3Key_toCoords,
+};
+
+static void  bitKey_CTOR3(bitKey_t *pk)
+{
+	Assert(pk);
+	memset(pk->vals_, 0, sizeof(pk->vals_));
+	pk->vtab_ = &key3_vtab_;
+}
 
 
 /*------------------------------------------------------------------------------------*/
@@ -252,8 +400,12 @@ void  bitKey_CTOR (bitKey_t *pk, int ncoords)
 		case 2: 
 			bitKey_CTOR2(pk);
 			break;
+		case 3:
+			bitKey_CTOR3(pk);
+			break;
 		default:
 			elog(ERROR, "bitKey for %d coordinates has not been yet realized", ncoords);
+			;
 	};
 }
 
@@ -279,25 +431,25 @@ int   bitKey_getBit (const bitKey_t *pk, int idx)
 void  bitKey_clearKey (bitKey_t *pk)
 {
 	Assert(pk);
-	return pk->vtab_->f_clearKey(pk);
+	pk->vtab_->f_clearKey(pk);
 }
 
 void  bitKey_setLowBits (bitKey_t *pk, int idx)
 {
 	Assert(pk);
-	return pk->vtab_->f_setLowBits(pk, idx);
+	pk->vtab_->f_setLowBits(pk, idx);
 }
 
 void  bitKey_clearLowBits (bitKey_t *pk, int idx)
 {
 	Assert(pk);
-	return pk->vtab_->f_clearLowBits(pk, idx);
+	pk->vtab_->f_clearLowBits(pk, idx);
 }
 
 void  bitKey_fromLong (bitKey_t *pk, Datum numeric)
 {
 	Assert(pk && numeric);
-	return pk->vtab_->f_fromLong(pk, numeric);
+	pk->vtab_->f_fromLong(pk, numeric);
 }
 
 Datum bitKey_toLong (const bitKey_t *pk)
@@ -309,13 +461,13 @@ Datum bitKey_toLong (const bitKey_t *pk)
 void  bitKey_fromCoords (bitKey_t *pk, const uint32 *coords, int n)
 {
 	Assert(pk && coords);
-	return pk->vtab_->f_fromCoords(pk, coords, n);
+	pk->vtab_->f_fromCoords(pk, coords, n);
 }
 
 void  bitKey_toCoords (const bitKey_t *pk, uint32 *coords, int n)
 {
 	Assert(pk && coords);
-	return pk->vtab_->f_toCoords(pk, coords, n);
+	pk->vtab_->f_toCoords(pk, coords, n);
 }
 
 
