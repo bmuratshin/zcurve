@@ -40,7 +40,7 @@ typedef struct spt_query2_s {
 } spt_query2_t;
 
 /* constructor */
-extern void spt_query2_CTOR (spt_query2_t *ps, Relation rel, uint32 *min_coords, uint32 *max_coords, int ncoords);
+extern void spt_query2_CTOR (spt_query2_t *ps, Relation rel, const uint32 *min_coords, const uint32 *max_coords, int ncoords);
 
 /* destructor */
 extern void spt_query2_DTOR (spt_query2_t *ps);

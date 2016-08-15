@@ -8,3 +8,4 @@ ALTER EXTENSION zcurve ADD function zcurve_val_from_xy(integer, integer);
 ALTER EXTENSION zcurve ADD function zcurve_num_from_xy(integer, integer);
 ALTER EXTENSION zcurve ADD function zcurve_num_from_xyz(integer, integer, integer);
 ALTER EXTENSION zcurve ADD FUNCTION zcurve_2d_lookup(text, integer, integer, integer, integer);
+ALTER EXTENSION zcurve ADD FUNCTION zcurve_3d_lookup(text, integer, integer, integer, integer, integer, integer);

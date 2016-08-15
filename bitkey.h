@@ -22,6 +22,7 @@
 		Datum(*f_toLong) (const bitKey_t *pk);
 		void(*f_fromCoords) (bitKey_t *pk, const uint32 *coords, int n);
 		void(*f_toCoords) (const bitKey_t *pk, uint32 *coords, int n);
+		void(*f_toStr) (const bitKey_t *pk, char *buf, int buflen);
 	} zkey_vtab_t;
 
 
@@ -45,6 +46,7 @@
 	extern Datum bitKey_toLong(const bitKey_t *pk);
 	extern void  bitKey_fromCoords(bitKey_t *pk, const uint32 *coords, int n);
 	extern void  bitKey_toCoords(const bitKey_t *pk, uint32 *coords, int n);
+	extern void  bitKey_toStr(const bitKey_t *pk, char *buf, int buflen);
 
 
 #endif /* __ZCURVE_BITKEY_H */

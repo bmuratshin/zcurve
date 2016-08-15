@@ -465,17 +465,17 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 
 /* constructing a scan context, it may be restarted later with other start_val */
 int 
-zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel)
+zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, int ncoords)
 {
-	Assert(ctx && start_val);
+	Assert(ctx && rel);
 	ctx->rel_ = rel;
-	bitKey_CTOR(&ctx->init_zv_, 2);
+	bitKey_CTOR(&ctx->init_zv_, ncoords);
 	ScanKeyInit(&ctx->skey_, 1, BTLessStrategyNumber, F_INT8LE, bitKey_toLong(&ctx->init_zv_));
 	ctx->offset_ = 0;
 	ctx->max_offset_ = 0;
-	bitKey_CTOR(&ctx->cur_val_, 2);
-	bitKey_CTOR(&ctx->next_val_, 2);
-	bitKey_CTOR(&ctx->last_page_val_, 2);
+	bitKey_CTOR(&ctx->cur_val_, ncoords);
+	bitKey_CTOR(&ctx->next_val_, ncoords);
+	bitKey_CTOR(&ctx->last_page_val_, ncoords);
 	ctx->buf_ = 0;
 	ctx->pstack_ = NULL;
 	return 1;

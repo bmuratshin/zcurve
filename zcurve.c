@@ -127,8 +127,7 @@ indexClose(Relation r)
 /* resulting item temporarily storing for sorting */
 typedef struct res_item_s {
 	ItemPointerData iptr_;	/* pointer to rable row */
-	uint32		x_;	/* x coord */
-	uint32		y_;	/* y coord */
+	uint32		coords_[ZKEY_MAX_COORDS]; /* x y z ... */
 	gen_list_t	link_;  /* next one */
 } res_item_t;
 
@@ -163,11 +162,8 @@ typedef struct p2d_ctx_s {
 
 /* constructor */
 static void 
-p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint32 x0, uint32 y0, uint32 x1, uint64 y1)
+p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, const uint32 *min_coords, const uint32 *max_coords, unsigned ncoords)
 {
-	uint32 min_coords[ZKEY_MAX_COORDS] = {x0, y0};
-	uint32 max_coords[ZKEY_MAX_COORDS] = {x1, y1};
-
 	List	   *relname_list;
 	RangeVar   *relvar;
 
@@ -180,7 +176,7 @@ p2d_ctx_t_CTOR(p2d_ctx_t *ptr, const char *relname, uint32 x0, uint32 y0, uint32
 	ptr->result_ = NULL;
 	ptr->cur_ = NULL;
 
-	spt_query2_CTOR (&ptr->qdef_, ptr->relation_, min_coords, max_coords, 2);
+	spt_query2_CTOR (&ptr->qdef_, ptr->relation_, min_coords, max_coords, ncoords);
 }
 
 /* destructor */
@@ -238,12 +234,13 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		/* lets start lookup, storing intermediate data in context list */
 		{
 			int 		ret;
-			uint32 coords[ZKEY_MAX_COORDS];
+			uint32 coords[ZKEY_MAX_COORDS] = {x0, y0};
+			uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1};
 			ItemPointerData iptr;
 
 			/* prepare lookup context */
 			pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
-			p2d_ctx_t_CTOR(pctx, relname, x0, y0, x1, y1);
+			p2d_ctx_t_CTOR(pctx, relname, coords, coords2, 2);
 
 			funcctx->user_fctx = pctx;
 
@@ -252,8 +249,8 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 			while (ret)
 			{
 				res_item_t *pit = (res_item_t *)palloc(sizeof(res_item_t));
-				pit->x_ = coords[0];
-				pit->y_ = coords[1];
+				pit->coords_[0] = coords[0];
+				pit->coords_[1] = coords[1];
 				pit->iptr_ = iptr;
 				pit->link_.data = pit;
 				pit->link_.next = pctx->result_;
@@ -285,13 +282,131 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 		{
 			res_item_t *pit = (res_item_t *)(pctx->cur_->data);
 			datums[0] = PointerGetDatum(&pit->iptr_);
-			datums[1] = Int32GetDatum(pit->x_);
-			datums[2] = Int32GetDatum(pit->y_);
+			datums[1] = Int32GetDatum(pit->coords_[0]);
+			datums[2] = Int32GetDatum(pit->coords_[1]);
 			pctx->cur_ = pctx->cur_->next;
 
 			nulls[0] = false;
 			nulls[1] = false;
 			nulls[2] = false;
+
+			htuple = heap_formtuple(attinmeta->tupdesc, datums, nulls);
+			result = TupleGetDatum(funcctx, htuple);
+			SRF_RETURN_NEXT(funcctx, result);
+		}
+		else
+		{
+			/* no more data, free resources and stop lookup */
+			p2d_ctx_t_DTOR(pctx);
+		}	
+	}
+	pfree(pctx);
+	SRF_RETURN_DONE(funcctx);
+}
+
+PG_FUNCTION_INFO_V1(zcurve_3d_lookup);
+Datum
+zcurve_3d_lookup(PG_FUNCTION_ARGS)
+{
+	/* SRF stuff */
+	FuncCallContext     *funcctx = NULL;
+	TupleDesc            tupdesc;
+	AttInMetadata       *attinmeta;
+	p2d_ctx_t 	    *pctx = NULL;
+
+	/* params */
+	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
+  	uint64 x0  = PG_GETARG_INT64(1);
+	uint64 y0  = PG_GETARG_INT64(2);
+	uint64 z0  = PG_GETARG_INT64(3);
+	uint64 x1  = PG_GETARG_INT64(4);
+	uint64 y1  = PG_GETARG_INT64(5);
+	uint64 z1  = PG_GETARG_INT64(6);
+
+	if (SRF_IS_FIRSTCALL())
+	{
+		MemoryContext   oldcontext;
+		funcctx = SRF_FIRSTCALL_INIT();
+
+		/* recordset cosists of 3 columns - t_tid & coordinates */
+		tupdesc = CreateTemplateTupleDesc(4, false);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 1, "ctid", TIDOID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 2, "x", INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 3, "y", INT4OID, -1, 0);
+		TupleDescInitEntry(tupdesc, (AttrNumber) 4, "z", INT4OID, -1, 0);
+
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+		funcctx->max_calls = 1000000;
+
+		if (get_call_result_type(fcinfo, NULL, &tupdesc) != TYPEFUNC_COMPOSITE)
+			ereport(ERROR,
+				(errcode(ERRCODE_FEATURE_NOT_SUPPORTED),
+				errmsg("function returning record called in context "
+				"that cannot accept type record")));
+
+		attinmeta = TupleDescGetAttInMetadata(tupdesc);
+		funcctx->attinmeta = attinmeta;
+		/* lets start lookup, storing intermediate data in context list */
+		{
+			int 		ret;
+			uint32 coords[ZKEY_MAX_COORDS] = {x0, y0, z0};
+			uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1};
+			ItemPointerData iptr;
+
+			/* prepare lookup context */
+			pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
+			p2d_ctx_t_CTOR(pctx, relname, coords, coords2, 3);
+
+			funcctx->user_fctx = pctx;
+
+			/* performing spatial cursor forwarding */
+			ret = spt_query2_moveFirst(&pctx->qdef_, coords, &iptr);
+			while (ret)
+			{
+				res_item_t *pit = (res_item_t *)palloc(sizeof(res_item_t));
+				pit->coords_[0] = coords[0];
+				pit->coords_[1] = coords[1];
+				pit->coords_[2] = coords[2];
+				pit->iptr_ = iptr;
+				pit->link_.data = pit;
+				pit->link_.next = pctx->result_;
+				pctx->result_ = &pit->link_;
+
+				pctx->cnt_++;
+				ret = spt_query2_moveNext(&pctx->qdef_, coords, &iptr);
+			}
+			/* sort temporary data */
+			pctx->result_ = list_sort (pctx->result_,  res_item_compare_proc, NULL);
+			pctx->cur_ = pctx->result_;
+		}
+		MemoryContextSwitchTo(oldcontext);
+	}
+
+	PG_FREE_IF_COPY(relname, 0);
+	funcctx = SRF_PERCALL_SETUP();
+	pctx = (p2d_ctx_t *) funcctx->user_fctx;
+
+	attinmeta = funcctx->attinmeta;
+
+	{
+		Datum		datums[4];
+		bool		nulls[4];
+	        HeapTuple    	htuple;
+	        Datum        	result;
+		/* while the end of result list is not reached */
+		if (pctx->cur_)
+		{
+			res_item_t *pit = (res_item_t *)(pctx->cur_->data);
+			datums[0] = PointerGetDatum(&pit->iptr_);
+			datums[1] = Int32GetDatum(pit->coords_[0]);
+			datums[2] = Int32GetDatum(pit->coords_[1]);
+			datums[3] = Int32GetDatum(pit->coords_[2]);
+			pctx->cur_ = pctx->cur_->next;
+
+			nulls[0] = false;
+			nulls[1] = false;
+			nulls[2] = false;
+			nulls[3] = false;
 
 			htuple = heap_formtuple(attinmeta->tupdesc, datums, nulls);
 			result = TupleGetDatum(funcctx, htuple);

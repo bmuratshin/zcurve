@@ -29,7 +29,7 @@
 
 /* constructor */
 void 
-spt_query2_CTOR (spt_query2_t *ps, Relation rel, uint32 *min_coords, uint32 *max_coords, int ncoords)
+spt_query2_CTOR (spt_query2_t *ps, Relation rel, const uint32 *min_coords, const uint32 *max_coords, int ncoords)
 {
 	int i;
 	Assert(NULL != ps && ncoords < ZKEY_MAX_COORDS);
@@ -48,7 +48,7 @@ spt_query2_CTOR (spt_query2_t *ps, Relation rel, uint32 *min_coords, uint32 *max
 	bitKey_CTOR(&ps->lastKey_, ncoords);
 
 	/* tree cursor init */
-	zcurve_scan_ctx_CTOR(&ps->qctx_, rel);
+	zcurve_scan_ctx_CTOR(&ps->qctx_, rel, ncoords);
 }
 
 /* destructor */
@@ -84,7 +84,7 @@ spt_query2_createQuery(spt_query2_t *q)
 void 
 spt_query2_freeQuery (spt_query2_t *q, spatial2Query_t *sq)
 {
-	Assert(q);
+	Assert(q && sq);
 	sq->prevQuery_ = q->freeHead_;
 	q->freeHead_ = sq;
 }
@@ -135,7 +135,7 @@ spt_query2_moveFirst(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 int
 spt_query2_moveNext (spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 {
-	Assert(q && x && y && iptr);
+	Assert(q && coords && iptr);
 	/*if all finished just go out*/
 	if (!zcurve_scan_ctx_is_opened(&q->qctx_))
 		return 0;
@@ -216,7 +216,7 @@ spt_query2_checkNextPage(spt_query2_t *q)
 int
 spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 {
-	Assert(q);
+	Assert(q && coords && iptr);
 	/* are there some subqueries in the queue? */
 	while(q->queryHead_)
 	{
@@ -316,8 +316,7 @@ spt_query2_checkKey (spt_query2_t *q, uint32 *coords)
 		return 0;
 
 	/* OK, return data */
-	Assert(x);
-	Assert(y);
+	Assert(coords);
 	bitKey_toCoords (&q->currentKey_, coords, ZKEY_MAX_COORDS);
 	return 1;
 }
@@ -327,7 +326,7 @@ int
 spt_query2_queryFind (spt_query2_t *q, const bitKey_t *start_val)
 {
 	int ret = zcurve_scan_move_first(&q->qctx_, start_val);
-	Assert(q);
+	Assert(q && start_val);
 	q->currentKey_ = q->qctx_.cur_val_;
 	q->lastKey_ = q->qctx_.last_page_val_;
 	q->iptr_ = q->qctx_.iptr_;

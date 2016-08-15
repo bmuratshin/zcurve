@@ -152,6 +152,19 @@ bit2Key_toLong (const bitKey_t *pk)
 	return nm;
 }
 
+static void  
+bit2Key_toStr(const bitKey_t *pk, char *buf, int buflen)
+{
+	uint32 coords[2];
+	bit2Key_toCoords (pk, coords, 2);
+	Assert(pk && buf && buflen > 128);
+	sprintf(buf, "[%x %x]: %d %d", 
+		(int)((pk->vals_[0] >> 32) & 0xffffffff),
+		(int)(pk->vals_[0] & 0xffffffff),
+		(int)coords[0],
+		(int)coords[1]);
+}
+
 
 static zkey_vtab_t key2_vtab_ = {
 	bit2Key_cmp,
@@ -164,6 +177,7 @@ static zkey_vtab_t key2_vtab_ = {
 	bit2Key_toLong,
 	bit2Key_fromCoords,
 	bit2Key_toCoords,
+	bit2Key_toStr,
 };
 
 static void  bitKey_CTOR2 (bitKey_t *pk)
@@ -392,6 +406,23 @@ bit3Key_toCoords(const bitKey_t *pk, uint32 *coords, int n)
 	coords[2] = z;
 }
 
+static void  
+bit3Key_toStr(const bitKey_t *pk, char *buf, int buflen)
+{
+	uint32 coords[3];
+	bit2Key_toCoords (pk, coords, 3);
+	Assert(pk && buf && buflen > 128);
+	sprintf(buf, "[%x %x %x]: %d %d %d", 
+		(int)(pk->vals_[1] & 0xffffffff),
+		(int)((pk->vals_[0] >> 32) & 0xffffffff),
+		(int)(pk->vals_[0] & 0xffffffff),
+		(int)coords[0],
+		(int)coords[1],
+		(int)coords[2]);
+}
+
+
+
 static zkey_vtab_t key3_vtab_ = {
 	bit3Key_cmp,
 	bit3Key_between,
@@ -403,6 +434,7 @@ static zkey_vtab_t key3_vtab_ = {
 	bit3Key_toLong,
 	bit3Key_fromCoords,
 	bit3Key_toCoords,
+	bit3Key_toStr,
 };
 
 static void  bitKey_CTOR3(bitKey_t *pk)
@@ -491,4 +523,9 @@ void  bitKey_toCoords (const bitKey_t *pk, uint32 *coords, int n)
 	pk->vtab_->f_toCoords(pk, coords, n);
 }
 
+void  bitKey_toStr(const bitKey_t *pk, char *buf, int buflen)
+{
+	Assert(pk && buf && buflen > 128);
+	pk->vtab_->f_toStr(pk, buf, buflen);
+}
 

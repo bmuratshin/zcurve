@@ -28,3 +28,9 @@ RETURNS SETOF __ret_2d_lookup
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE STRICT;
 
+CREATE TYPE __ret_3d_lookup AS (c_tid TID, x integer, y integer, z integer);
+CREATE FUNCTION zcurve_3d_lookup(text, integer, integer, integer, integer, integer, integer)
+RETURNS SETOF __ret_3d_lookup
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE STRICT;
+
