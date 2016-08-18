@@ -1,14 +1,14 @@
 /*
- * contrib/zcurve/sp_tree_2d.h
+ * contrib/zcurve/sp_tree.h
  *
  *
- * sp_tree_2d.h -- low level operations with numbers and 2D ZCurve index realized as a regular btree
+ * sp_tree.h -- low level operations with numbers and 2D ZCurve index realized as a regular btree
  *		
  *
  * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
  */
-#ifndef __ZCURVE_SP_TREE_2D_H
-#define __ZCURVE_SP_TREE_2D_H
+#ifndef __ZCURVE_SP_TREE_H
+#define __ZCURVE_SP_TREE_H
 
 #include "bitkey.h"
 
@@ -67,4 +67,4 @@ extern int zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, const bitKey_t *che
 /* testing for cursor is active */
 extern int zcurve_scan_ctx_is_opened(zcurve_scan_ctx_t *ctx);
 
-#endif  /*__ZCURVE_SP_TREE_2D_H*/
+#endif  /*__ZCURVE_SP_TREE_H*/

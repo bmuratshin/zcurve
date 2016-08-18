@@ -1,8 +1,8 @@
 /*
- * contrib/zcurve/sp_query_2d.c
+ * contrib/zcurve/sp_query.c
  *
  *
- * sp_query_2d.c -- 2d spatial lookup stuff
+ * sp_query.c -- spatial lookup stuff
  *		
  *
  * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
@@ -22,8 +22,8 @@
 #include "access/nbtree.h"
 #include "storage/bufpage.h"
 
-#include "sp_tree_2d.h"
-#include "sp_query_2d.h"
+#include "sp_tree.h"
+#include "sp_query.h"
 #include "bitkey.h"
 
 

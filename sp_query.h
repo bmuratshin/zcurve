@@ -1,17 +1,17 @@
 /*
- * contrib/zcurve/sp_query_2d.h
+ * contrib/zcurve/sp_query.h
  *
  *
- * sp_query_2d.h -- 2d spatial lookup stuff
+ * sp_query.h -- spatial lookup stuff
  *		
  *
  * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
  */
-#ifndef __ZCURVE_SPATIAL_INDEX_2D_H
-#define __ZCURVE_SPATIAL_INDEX_2D_H
+#ifndef __ZCURVE_SPATIAL_INDEX_H
+#define __ZCURVE_SPATIAL_INDEX_H
 
 #include "bitkey.h"
-#include "sp_tree_2d.h"
+#include "sp_tree.h"
 
 /* subquery definition */
 typedef struct spatial2Query_s {
@@ -97,4 +97,4 @@ extern int spt_query2_checkKey(spt_query2_t *q, uint32 *coords);
 extern int spt_query2_checkNextPage(spt_query2_t *q);
     
 
-#endif /* __ZCURVE_SPATIAL_INDEX_2D_H */
+#endif /* __ZCURVE_SPATIAL_INDEX_H */

@@ -23,8 +23,8 @@
 #include "access/nbtree.h"
 #include "access/htup_details.h"
 
-#include "sp_tree_2d.h"
-#include "sp_query_2d.h"
+#include "sp_tree.h"
+#include "sp_query.h"
 #include "gen_list.h"
 #include "list_sort.h"
 #include "bitkey.h"

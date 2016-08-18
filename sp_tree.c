@@ -1,8 +1,8 @@
 /*
- * contrib/zcurve/list_sort.c
+ * contrib/zcurve/sp_tree.c
  *
  *
- * sp_tree_2d.c -- low level operations with numbers and 2D ZCurve index realized as a regular btree
+ * sp_tree.c -- low level operations with numbers and 2D ZCurve index realized as a regular btree
  *		
  *
  * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
@@ -24,8 +24,8 @@
 #include "access/htup_details.h"
 #include "storage/bufpage.h"
 
-#include "sp_tree_2d.h"
-#include "sp_query_2d.h"
+#include "sp_tree.h"
+#include "sp_query.h"
 #include "gen_list.h"
 #include "list_sort.h"
 
