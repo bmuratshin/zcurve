@@ -11,6 +11,12 @@
 #include <string.h>
 #include "postgres.h"
 #include "catalog/pg_type.h"
+
+#if PG_VERSION_NUM >= 90600
+#include "catalog/pg_am.h"
+#define heap_formtuple heap_form_tuple
+#endif
+
 #include "fmgr.h"
 #include "funcapi.h"
 #include "utils/rel.h"
@@ -264,7 +270,11 @@ zcurve_search_2d(zcurve_scan_ctx_t *pctx)
 		 * this is a good opportunity to finish splits of internal pages too.
 		 */
 		pctx->buf_ = _bt_moveright(rel, pctx->buf_, keysz, &pctx->skey_, nextkey,
-						(access == BT_WRITE), stack_in,	  BT_READ);
+						(access == BT_WRITE), stack_in,	  BT_READ
+#if PG_VERSION_NUM >= 90600
+						, NULL
+#endif
+						);
 		/* if this is a leaf page, we're done */
 		page = BufferGetPage(pctx->buf_);
 
@@ -309,6 +319,7 @@ zcurve_search_2d(zcurve_scan_ctx_t *pctx)
 }
 
 
+#if 0
 /*
  * Check if relation is index and has specified am oid. Trigger error if not
  */
@@ -325,7 +336,7 @@ checkOpenedRelation(Relation r, Oid PgAmOid)
 			 RelationGetRelationName(r));
 	return r;
 }
-
+#endif
 /*
  * Open index relation with AccessShareLock.
  */
@@ -337,8 +348,8 @@ indexOpen(RangeVar *relvar)
 #else
 	Oid			relOid = RangeVarGetRelid(relvar, NoLock, false);
 #endif
-	return checkOpenedRelation(
-						   index_open(relOid, AccessShareLock), BTREE_AM_OID);
+
+	return   index_open(relOid, AccessShareLock);
 }
 
 /*
