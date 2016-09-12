@@ -305,7 +305,7 @@ zcurve_search_2d(zcurve_scan_ctx_t *pctx)
 		 * this is a good opportunity to finish splits of internal pages too.
 		 */
 		pctx->buf_ = _bt_moveright(rel, pctx->buf_, keysz, &pctx->skey_, nextkey,
-						(access == BT_WRITE), stack_in,	  BT_READ);
+						(access == BT_WRITE), stack_in,	  BT_READ, NULL);
 		/* if this is a leaf page, we're done */
 		page = BufferGetPage(pctx->buf_);
 

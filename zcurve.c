@@ -20,6 +20,9 @@
 #include "utils/numeric.h"
 #include "utils/lsyscache.h"
 #include "catalog/namespace.h"
+#if PG_VERSION_NUM >= 90600
+#include "catalog/pg_am.h"
+#endif
 #include "access/nbtree.h"
 #include "access/htup_details.h"
 
@@ -29,6 +32,9 @@
 #include "list_sort.h"
 #include "bitkey.h"
 
+#if PG_VERSION_NUM >= 90600
+#define heap_formtuple heap_form_tuple
+#endif
 
 PG_MODULE_MAGIC;
 
@@ -83,22 +89,6 @@ zcurve_num_from_xyz(PG_FUNCTION_ARGS)
 }
 
 
-/*
- * Check if relation is index and has specified am oid. Trigger error if not
- */
-static Relation
-checkOpenedRelation(Relation r, Oid PgAmOid)
-{
-	if (r->rd_am == NULL)
-		elog(ERROR, "Relation %s.%s is not an index",
-			 get_namespace_name(RelationGetNamespace(r)),
-			 RelationGetRelationName(r));
-	if (r->rd_rel->relam != PgAmOid)
-		elog(ERROR, "Index %s.%s has wrong type",
-			 get_namespace_name(RelationGetNamespace(r)),
-			 RelationGetRelationName(r));
-	return r;
-}
 
 /*
  * Open index relation with AccessShareLock.
@@ -111,8 +101,7 @@ indexOpen(RangeVar *relvar)
 #else
 	Oid			relOid = RangeVarGetRelid(relvar, NoLock, false);
 #endif
-	return checkOpenedRelation(
-						   index_open(relOid, AccessShareLock), BTREE_AM_OID);
+	return   index_open(relOid, AccessShareLock);
 }
 
 /*
