@@ -17,7 +17,9 @@
 typedef struct spatial2Query_s {
 	bitKey_t lowKey_;	/* the begining of index interval */
 	bitKey_t highKey_;	/* the end of index interval */
-	int curBitNum_;		/* the number of key bit that will be used to split this one to subqueries (if necessary, sure) */
+	unsigned curBitNum_ : 16;		/* the number of key bit that will be used to split this one to subqueries (if necessary, sure) */
+	unsigned solid_ : 1;	/* hypercube flag */
+	unsigned ncoords_ : 3;	/* domension */
 	struct spatial2Query_s *prevQuery_; 	/* pointer to subqueries queue */
 } spatial2Query_t;
 
@@ -65,6 +67,9 @@ extern spatial2Query_t *spt_query2_createQuery (spt_query2_t *q);
 
 /* closes index tree cursor */
 extern void spt_query2_closeQuery(spt_query2_t *q);
+
+/* testing for query is solid - no additional splitting etc, just out data */
+extern void spt_query2_testSolidity (spatial2Query_t *q);
 
 /* push subquery to the reuse list */
 extern void spt_query2_freeQuery(spt_query2_t *q, spatial2Query_t *);

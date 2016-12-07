@@ -74,6 +74,8 @@ spt_query2_createQuery(spt_query2_t *q)
 	}
 	ret = (spatial2Query_t *)palloc(sizeof(spatial2Query_t));
 	ret->curBitNum_ = 0;
+	ret->solid_ = 0;
+	ret->ncoords_ = q->ncoords_;
 	ret->prevQuery_ = NULL;
 	bitKey_CTOR(&ret->lowKey_, q->ncoords_);
 	bitKey_CTOR(&ret->highKey_, q->ncoords_);
@@ -88,6 +90,67 @@ spt_query2_freeQuery (spt_query2_t *q, spatial2Query_t *sq)
 	sq->prevQuery_ = q->freeHead_;
 	q->freeHead_ = sq;
 }
+
+
+static int 
+Log2(int n)
+{
+	return !!(n & 0xFFFF0000) << 4
+		| !!(n & 0xFF00FF00) << 3
+		| !!(n & 0xF0F0F0F0) << 2
+		| !!(n & 0xCCCCCCCC) << 1
+		| !!(n & 0xAAAAAAAA);
+}
+
+/* testing for query is solid - no additional splitting etc, just out data */
+void
+spt_query2_testSolidity (spatial2Query_t *q)
+{
+	uint32_t lcoords[ZKEY_MAX_COORDS];
+	uint32_t hcoords[ZKEY_MAX_COORDS];
+	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
+	uint64_t vol = 1;
+
+	bitKey_toCoords (&q->lowKey_, lcoords, ZKEY_MAX_COORDS);
+	bitKey_toCoords (&q->highKey_, hcoords, ZKEY_MAX_COORDS);
+
+	for (i=0; i < q->ncoords_; i++)
+	{
+		dcoords[i] = hcoords[i] - lcoords[i];
+		vol *= (unsigned)(dcoords[i]);
+		if (dcoords[i]++)
+		{
+			diff = 1 << Log2(dcoords[i]);
+			if (diff != dcoords[i])
+			{
+				ok = 0;
+				break;
+			}
+			if (odiff && odiff != diff)
+			{
+				ok = 0;
+				break;
+			}
+			odiff = diff;
+		}
+	}
+	if (0 == vol)
+	{
+		ok = 0;
+	}
+	q->solid_ = ok;
+
+#if 0
+	/* gnuplot line compatible output*/
+	elog(INFO, "%d %d",lcoords[0], lcoords[2]);
+	elog(INFO, "%d %d",lcoords[0], hcoords[2]);
+	elog(INFO, "%d %d",hcoords[0], hcoords[2]);
+	elog(INFO, "%d %d",hcoords[0], lcoords[2]);
+	elog(INFO, "%d %d %d %d %d %llu %c",lcoords[0], lcoords[2], dcoords[0], dcoords[1], dcoords[2], vol, ok?'*':' ');
+	elog(INFO, "");
+#endif
+}
+
 
 /* just closes index tree cursor */
 void 
@@ -128,6 +191,8 @@ spt_query2_moveFirst(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 	bitKey_fromCoords(&q->queryHead_->lowKey_, q->min_point_, ZKEY_MAX_COORDS); 
 	bitKey_fromCoords(&q->queryHead_->highKey_, q->max_point_, ZKEY_MAX_COORDS);
 
+	spt_query2_testSolidity(q->queryHead_);
+
 	return spt_query2_findNextMatch(q, coords, iptr);
 }
 
@@ -138,12 +203,14 @@ spt_query2_moveNext (spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 	Assert(q && coords && iptr);
 	/*if all finished just go out*/
 	if (!zcurve_scan_ctx_is_opened(&q->qctx_))
+	{
 		return 0;
-
+	}
 	/* current subquery is finished, let's get a new one*/
 	if (q->subQueryFinished_)
+	{
     		return spt_query2_findNextMatch(q, coords, iptr);
-
+	}
 	/* when the upper bound of subquery is equal to the current page last val, we need some additional testing */
 	if(!spt_query2_checkNextPage(q))
 	{
@@ -182,6 +249,7 @@ spt_query2_moveNext (spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 			return 0;
 		}
 	}
+
 	/* subquery finished, start the next one from the queue */
 	spt_query2_releaseSubQuery(q);
 	return spt_query2_findNextMatch(q, coords, iptr);
@@ -229,7 +297,8 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 			return 0;
 		}
 		/* while there is something to split (last value on the current page less then the upper bound of subquery diapason) */
-		while (bitKey_cmp(&q->lastKey_, &q->queryHead_->highKey_) < 0)
+		while (0 == q->queryHead_->solid_ && 
+			bitKey_cmp(&q->lastKey_, &q->queryHead_->highKey_) < 0)
 		{
 			/* let's split query */
 			spatial2Query_t *subQuery = NULL;
@@ -270,8 +339,13 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 				elog(INFO, "Q[%d %d %d %d]",x0, y0, x1, y1);
 			}*/
 
+			spt_query2_testSolidity(subQuery);
+			spt_query2_testSolidity(q->queryHead_);
+
 			q->queryHead_ = subQuery;
 			q->subQueryFinished_ = 0;
+
+
 		}
 
 		/* up to the lookup diapason end */
@@ -312,7 +386,8 @@ spt_query2_checkKey (spt_query2_t *q, uint32 *coords)
 	const bitKey_t *hKey = &q->queryHead_->highKey_;
 
 	/* let's try our key is positioned in necessary diapason */
-	if (0 == bitKey_between(&q->currentKey_, lKey, hKey))
+	if (0 == q->queryHead_->solid_ && 
+	    0 == bitKey_between(&q->currentKey_, lKey, hKey))
 		return 0;
 
 	/* OK, return data */

@@ -364,16 +364,15 @@ static int
 zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 {
 	Page 		page;
-	BTStack		stack = ctx->pstack_;
+	BTPageOpaque	opaque;
 	ItemId		itemid;
 	IndexTuple	itup;
 	Datum		arg;
 	bool		null;
-	int 		ilevel = 0;
+	int 		ret = 0;
 
 	/* save the cursor context */
 	BlockNumber	old_block_num = (ctx->buf_) ? BufferGetBlockNumber(ctx->buf_) : 0;
-	BlockNumber	new_block_num = 0;
 
 	OffsetNumber	old_offset = ctx->offset_;
 	OffsetNumber	old_max_offset = ctx->max_offset_;
@@ -381,57 +380,32 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 
 	bitKey_t	old_cur_val = ctx->cur_val_;
 	bitKey_t	old_last_page_val = ctx->last_page_val_;
-	
+
+	if (0 == ctx->buf_)
+		return 0;
+
+	page = BufferGetPage(ctx->buf_);
+	opaque = (BTPageOpaque) PageGetSpecialPointer(page);
+
 	for (;;)
 	{
-		BTPageOpaque opaque;
-		OffsetNumber mx = 0;
-		ilevel++;
+		if (P_RIGHTMOST(opaque))
+			break;
 
-		/* such as we currently at the pasge end, we need to step upper by pages stack and then down to the next page */
-		/* drop the read lock on the parent page, acquire one on the child */
-		ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, stack->bts_blkno, BT_READ);
-		new_block_num = stack->bts_blkno;
+		ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, opaque->btpo_next, BT_READ);
 		page = BufferGetPage(ctx->buf_);
-		mx = PageGetMaxOffsetNumber(page);
+		opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 
-		/* if we are not at the end of the parent's page 
-		   otherwise, just keep step upper
-		*/
-		if (stack->bts_offset < mx)
+		if (P_IGNORE(opaque))
+			continue;
+		else
 		{
-			BlockNumber  blkno;
-			int i;
-			/* one step down to (stack->bts_offset + 1) item */
-			{
-				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-				itemid = PageGetItemId(page, stack->bts_offset + 1);
-				itup = (IndexTuple) PageGetItem(page, itemid);
-				blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
-				/*elog (INFO, "BLKNO=%d", blkno);*/
-				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
-				new_block_num = blkno;
+			page = BufferGetPage(ctx->buf_);
+			opaque = (BTPageOpaque) PageGetSpecialPointer(page);
 
-				page = BufferGetPage(ctx->buf_);
-				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-				ctx->offset_ = P_FIRSTDATAKEY(opaque);
-			}
-			/* and then going down by the first only items */
-			for (i = 0; i < ilevel - 1; i++)
-			{
-				opaque = (BTPageOpaque) PageGetSpecialPointer(page);
-				ctx->offset_ = P_FIRSTDATAKEY(opaque);
-				itemid = PageGetItemId(page, ctx->offset_);
-				itup = (IndexTuple) PageGetItem(page, itemid);
-				blkno = ItemPointerGetBlockNumber(&(itup->t_tid));
-
-				new_block_num = blkno;
-				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, blkno, BT_READ);
-				page = BufferGetPage(ctx->buf_);
-			}
-
-			/* filling cursor context */
 			ctx->max_offset_ = PageGetMaxOffsetNumber(page);
+			ctx->offset_ = P_FIRSTDATAKEY(opaque);
+
 			itemid = PageGetItemId(page, ctx->offset_);
 			itup = (IndexTuple) PageGetItem(page, itemid);
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
@@ -444,27 +418,21 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
 			bitKey_fromLong(&ctx->last_page_val_, arg);
 
-			/* and restoring context back if necessary */
-			if (preserve_position && old_block_num && old_block_num != new_block_num)
-			{
-				ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, old_block_num, BT_READ);
-
-				ctx->offset_ = old_offset;
-				ctx->max_offset_ = old_max_offset;
-				ctx->cur_val_ = old_cur_val;
-				ctx->last_page_val_ = old_last_page_val;
-				ctx->iptr_ = old_iptr;
-				/* ctx->next_val_ not restored */
-			}
-			return 1;
-		}
-
-		if (stack->bts_parent == NULL)
+			ret = 1;
 			break;
-
-		stack = stack->bts_parent;
+		}
 	}
-  return 0;
+	if (preserve_position)
+	{
+		ctx->buf_ = _bt_relandgetbuf(ctx->rel_, ctx->buf_, old_block_num, BT_READ);
+		ctx->offset_ = old_offset;
+		ctx->max_offset_ = old_max_offset;
+		ctx->cur_val_ = old_cur_val;
+		ctx->last_page_val_ = old_last_page_val;
+		ctx->iptr_ = old_iptr;
+		/* ctx->next_val_ not restored */
+	}
+  	return ret;
 }
 
 /* constructing a scan context, it may be restarted later with other start_val */
@@ -568,7 +536,6 @@ int
 zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 {
 	Assert(ctx);
-	/*elog(INFO, "zcurve_scan_move_next");*/
 	if (ctx->offset_ < ctx->max_offset_)
 	{
 		/* 
@@ -591,7 +558,6 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 		ctx->iptr_ = itup->t_tid;
 		return 1;
 	}
-
 	/* page ends, just move to next one */
 	return zcurve_scan_step_forward(ctx, false);
 }
@@ -608,7 +574,7 @@ zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, const bitKey_t *check_val)
 	/* test first item on the next page */
 	if (zcurve_scan_step_forward(ctx, true))
 	{
-		int ret = (bitKey_cmp(& ctx->next_val_, check_val) <= 0) ? 1 : 0;
+		int ret = (bitKey_cmp(&ctx->next_val_, check_val) <= 0) ? 1 : 0;
 		/* if it is in subquery range, return true */
 		return ret;
 	}
