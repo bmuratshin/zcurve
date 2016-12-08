@@ -139,6 +139,10 @@ spt_query2_testSolidity (spatial2Query_t *q)
 		ok = 0;
 	}
 	q->solid_ = ok;
+	if (ok)
+	{
+		q->dhighKey_ = bitKey_toLong(&q->highKey_);
+	}
 
 #if 0
 	/* gnuplot line compatible output*/
@@ -196,7 +200,7 @@ spt_query2_moveFirst(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 	return spt_query2_findNextMatch(q, coords, iptr);
 }
 
-/* PUBLIC, main loop iteration, returns not 0 in case of cuccess, resulting data in x,y,iptr */
+/* PUBLIC, main loop iteration, returns not 0 in case of cuccess, resulting data in x,y,...,iptr */
 int
 spt_query2_moveNext (spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 {
@@ -211,42 +215,50 @@ spt_query2_moveNext (spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 	{
     		return spt_query2_findNextMatch(q, coords, iptr);
 	}
-	/* when the upper bound of subquery is equal to the current page last val, we need some additional testing */
-	if(!spt_query2_checkNextPage(q))
-	{
-		/* no, nothin interesting in the begining of the next page, start the next subquery */
-		spt_query2_releaseSubQuery(q);
-		return spt_query2_findNextMatch(q, coords, iptr);
-	}
 
-	/* are there some interesting data in the index tree? */
-	if (!spt_query2_queryNextKey(q))
+	for (;;)
 	{
-		/* query diapason is exhausted, no more data, finished */
-		spt_query2_closeQuery(q);
-		return 0;
-	}
-
-	/* up to the lookup diapason end */
-	while (bitKey_cmp(&q->currentKey_, &q->queryHead_->highKey_) <= 0)
-	{
-		/* test if current key in lookup extent */
-		if (spt_query2_checkKey(q, coords))
+		if (q->queryHead_->solid_)
 		{
-			/* if yes, returning success */
+			/* are there some interesting data in the index tree? */
+			if (!spt_query2_queryNextKey(q))
+			{
+				/* query diapason is exhausted, no more data, finished */
+				spt_query2_closeQuery(q);
+				return 0;
+			}
+
+			if (!spt_query2_getNTestNextRawKey(q, true))
+				break;
+
 			*iptr = q->iptr_;
 			return 1;
 		}
-		/* again, when the upper bound of subquery is equal to the current page last val, we need some additional testing */
-		if (!spt_query2_checkNextPage(q))
-			break;
-
-		/* are there some interesting data there? */
-		if (!spt_query2_queryNextKey(q))
+		else
 		{
-			/* no, just returning */
-			spt_query2_closeQuery(q);
-			return 0;
+			/* when the upper bound of subquery is equal to the current page last val, we need some additional testing */
+			if (!spt_query2_checkNextPage(q))
+				break;
+
+			/* are there some interesting data in the index tree? */
+			if (!spt_query2_queryNextKey(q))
+			{
+				/* query diapason is exhausted, no more data, finished */
+				spt_query2_closeQuery(q);
+				return 0;
+			}
+
+			/* up to the lookup diapason end */
+			if (bitKey_cmp(&q->currentKey_, &q->queryHead_->highKey_) > 0)
+				break;
+	
+			/* test if current key in lookup extent */
+			if (spt_query2_checkKey(q, coords))
+			{
+				/* if yes, returning success */
+				*iptr = q->iptr_;
+				return 1;
+			}
 		}
 	}
 
@@ -274,6 +286,27 @@ spt_query2_checkNextPage(spt_query2_t *q)
 		return 1;
 	}
 	return 1;
+}
+
+/* reads next key and comares it with hikey datum, for solid queries only, optimisation */
+int
+spt_query2_getNTestNextRawKey(spt_query2_t *q, bool need_fetch)
+{
+	int cmp;
+	/* are there some interesting data in the index tree? */
+	//if (need_fetch && !spt_query2_queryNextKey(q))
+	//{
+	//	/* query diapason is exhausted, no more data, finished */
+	//	spt_query2_closeQuery(q);
+	//	return 0;
+	//}
+
+	cmp = DatumGetInt32(
+		DirectFunctionCall2(
+			numeric_cmp,
+			q->qctx_.raw_val_,
+			q->queryHead_->dhighKey_));
+	return cmp <= 0 ? 1 : 0;
 }
 
 
@@ -324,51 +357,47 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 			/* decrease bits pointers */
 			subQuery->curBitNum_ = --q->queryHead_->curBitNum_;
 
-			/*{
-				uint32 x0,y0;
-				uint32 x1,y1;
-
-				elog(INFO, "[%lx %lx]", q->queryHead->lowKey.val_, q->queryHead->highKey.val_);
-				bit2Key_toXY(&q->queryHead->lowKey, &x0, &y0);
-				bit2Key_toXY(&q->queryHead->highKey, &x1, &y1);
-				elog(INFO, "Q[%d %d %d %d]",x0, y0, x1, y1);
-
-				elog(INFO, "[%lx %lx]", subQuery->lowKey.val_, subQuery->highKey.val_);
-				bit2Key_toXY(&subQuery->lowKey, &x0, &y0);
-				bit2Key_toXY(&subQuery->highKey, &x1, &y1);
-				elog(INFO, "Q[%d %d %d %d]",x0, y0, x1, y1);
-			}*/
-
 			spt_query2_testSolidity(subQuery);
 			spt_query2_testSolidity(q->queryHead_);
 
 			q->queryHead_ = subQuery;
 			q->subQueryFinished_ = 0;
-
-
 		}
 
-		/* up to the lookup diapason end */
-        	while (bitKey_cmp(&q->currentKey_, &q->queryHead_->highKey_) <= 0)
+		for (;;)
 		{
-			/* test if current key in lookup extent */
-			if (spt_query2_checkKey(q, coords))
+			if (q->queryHead_->solid_)
 			{
-				/* if yes, returning success */
+				if (!spt_query2_getNTestNextRawKey(q, true))
+					break;
+
 				*iptr = q->iptr_;
 				return 1;
 			}
-			/* again, when the upper bound of subquery is equal to the current page last val, we need some additional testing */
-			if (!spt_query2_checkNextPage(q))
-				break;
-			/* are there some interesting data there? */
-			if (!spt_query2_queryNextKey(q))
+			else
 			{
-				/* no, just returning */
-				spt_query2_closeQuery(q);
-                		return 0;
+				if (bitKey_cmp(&q->currentKey_, &q->queryHead_->highKey_) > 0)
+					break;
+
+				if (spt_query2_checkKey(q, coords))
+				{
+					/* if yes, returning success */
+					*iptr = q->iptr_;
+					return 1;
+				}
+				/* again, when the upper bound of subquery is equal to the current page last val, we need some additional testing */
+				if (!spt_query2_checkNextPage(q))
+					break;
+				/* are there some interesting data there? */
+				if (!spt_query2_queryNextKey(q))
+				{
+					/* no, just returning */
+					spt_query2_closeQuery(q);
+	                		return 0;
+				}
 			}
 		}
+
 		/* subquery finished, let's try next one */
 		spt_query2_releaseSubQuery(q);
 	}
@@ -400,7 +429,7 @@ spt_query2_checkKey (spt_query2_t *q, uint32 *coords)
 int
 spt_query2_queryFind (spt_query2_t *q, const bitKey_t *start_val)
 {
-	int ret = zcurve_scan_move_first(&q->qctx_, start_val);
+	int ret = zcurve_scan_move_first(&q->qctx_, start_val, q->queryHead_->solid_);
 	Assert(q && start_val);
 	q->currentKey_ = q->qctx_.cur_val_;
 	q->lastKey_ = q->qctx_.last_page_val_;
@@ -412,7 +441,7 @@ spt_query2_queryFind (spt_query2_t *q, const bitKey_t *start_val)
 int
 spt_query2_queryNextKey (spt_query2_t *q)
 {
-	int ret = zcurve_scan_move_next(&q->qctx_);
+	int ret = zcurve_scan_move_next(&q->qctx_, q->queryHead_->solid_);
 	Assert(q);
 	q->currentKey_ = q->qctx_.cur_val_;
 	q->lastKey_ = q->qctx_.last_page_val_;

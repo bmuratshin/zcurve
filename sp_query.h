@@ -20,6 +20,7 @@ typedef struct spatial2Query_s {
 	unsigned curBitNum_ : 16;		/* the number of key bit that will be used to split this one to subqueries (if necessary, sure) */
 	unsigned solid_ : 1;	/* hypercube flag */
 	unsigned ncoords_ : 3;	/* domension */
+	Datum    dhighKey_;	/* the same as high_key_ but in numeric for, solid requests only, optimisation */
 	struct spatial2Query_s *prevQuery_; 	/* pointer to subqueries queue */
 } spatial2Query_t;
 
@@ -92,6 +93,9 @@ extern int spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointer
 
 /* split current cursor value back to x & y and check it complies to query extent */
 extern int spt_query2_checkKey(spt_query2_t *q, uint32 *coords);
+
+/* reads next key and comares it with hikey datum, for solid queries only, optimisation */
+extern int spt_query2_getNTestNextRawKey(spt_query2_t *q, bool need_fetch);
 
 /* 
   If cursor points not to the end of page just return OK.

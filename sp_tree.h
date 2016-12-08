@@ -26,6 +26,8 @@ typedef struct zcurve_scan_ctx_s {
 	bitKey_t	last_page_val_;	/* last value on the current page */
 	ItemPointerData iptr_;		/* table row pointer from the current cursor position */
 
+	Datum		raw_val_;
+
 	BTStack		pstack_;	/* intermediate pages stack to the current page, need for possible interpages step */
 } zcurve_scan_ctx_t;
 
@@ -56,10 +58,10 @@ extern int zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, int ncoord
 extern int zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx);
 
 /* starting cursor, it may be resterted with new value without calling destructor */
-extern int zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, const bitKey_t *start_val);
+extern int zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, const bitKey_t *start_val, bool raw);
 
 /* cursor forward moving*/
-extern int zcurve_scan_move_next(zcurve_scan_ctx_t *ctx);
+extern int zcurve_scan_move_next(zcurve_scan_ctx_t *ctx, bool raw);
 
 /* testing next value on the folowing page, cursor preserves its position */
 extern int zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, const bitKey_t *check_val);

@@ -361,7 +361,7 @@ zcurve_search_2d(zcurve_scan_ctx_t *pctx)
    if preserve_position is true, cursor after return stays untouched
  */
 static int 
-zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
+zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position, bool raw)
 {
 	Page 		page;
 	BTPageOpaque	opaque;
@@ -409,15 +409,18 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position)
 			itemid = PageGetItemId(page, ctx->offset_);
 			itup = (IndexTuple) PageGetItem(page, itemid);
 			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-			bitKey_fromLong(&ctx->cur_val_, arg);
-			ctx->next_val_ = ctx->cur_val_;
 			ctx->iptr_ = itup->t_tid;
+			ctx->raw_val_ = arg;
+			if (!raw)
+			{
+				bitKey_fromLong(&ctx->cur_val_, arg);
+				ctx->next_val_ = ctx->cur_val_;
 
-			itemid = PageGetItemId(page, ctx->max_offset_);
-			itup = (IndexTuple) PageGetItem(page, itemid);
-			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-			bitKey_fromLong(&ctx->last_page_val_, arg);
-
+				itemid = PageGetItemId(page, ctx->max_offset_);
+				itup = (IndexTuple) PageGetItem(page, itemid);
+				arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+				bitKey_fromLong(&ctx->last_page_val_, arg);
+			}
 			ret = 1;
 			break;
 		}
@@ -475,7 +478,7 @@ zcurve_scan_ctx_DTOR(zcurve_scan_ctx_t *ctx)
 
 /* starting cursor, it may be restorted with new value without calling destructor */
 int 
-zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, const bitKey_t *start_val)
+zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, const bitKey_t *start_val, bool raw)
 {
 	Page 		page;
 	ItemId		itemid;
@@ -512,20 +515,22 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, const bitKey_t *start_val)
 		itemid = PageGetItemId(page, ctx->offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		bitKey_fromLong(&ctx->cur_val_, arg);
 		ctx->iptr_ = itup->t_tid;
-
-		itemid = PageGetItemId(page, ctx->max_offset_);
-		itup = (IndexTuple) PageGetItem(page, itemid);
-		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		bitKey_fromLong(&ctx->last_page_val_, arg);
-
+		ctx->raw_val_ = arg;
+		if (!raw)
+		{
+			bitKey_fromLong(&ctx->cur_val_, arg);
+			itemid = PageGetItemId(page, ctx->max_offset_);
+			itup = (IndexTuple) PageGetItem(page, itemid);
+			arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
+			bitKey_fromLong(&ctx->last_page_val_, arg);
+		}
 		return 1;
 	}
 	else
 	{
 		/* well, our item between pages, we need to move cursor forward */
-		return zcurve_scan_step_forward(ctx, false);
+		return zcurve_scan_step_forward(ctx, false, raw);
 	}
 	/* notreached */
 	return 0;
@@ -533,7 +538,7 @@ zcurve_scan_move_first(zcurve_scan_ctx_t *ctx, const bitKey_t *start_val)
 
 /* cursor forward moving*/
 int 
-zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
+zcurve_scan_move_next(zcurve_scan_ctx_t *ctx, bool raw)
 {
 	Assert(ctx);
 	if (ctx->offset_ < ctx->max_offset_)
@@ -553,13 +558,16 @@ zcurve_scan_move_next(zcurve_scan_ctx_t *ctx)
 		itemid = PageGetItemId(page, ctx->offset_);
 		itup = (IndexTuple) PageGetItem(page, itemid);
 		arg = index_getattr(itup, 1, RelationGetDescr(ctx->rel_), &null);
-		bitKey_fromLong(&ctx->cur_val_, arg);
-
+		ctx->raw_val_ = arg;
+		if (!raw)
+		{
+			bitKey_fromLong(&ctx->cur_val_, arg);
+		}
 		ctx->iptr_ = itup->t_tid;
 		return 1;
 	}
 	/* page ends, just move to next one */
-	return zcurve_scan_step_forward(ctx, false);
+	return zcurve_scan_step_forward(ctx, false, raw);
 }
 
 /* test first item on the next page */
@@ -572,7 +580,7 @@ zcurve_scan_try_move_next(zcurve_scan_ctx_t *ctx, const bitKey_t *check_val)
 		return 1;
 	}
 	/* test first item on the next page */
-	if (zcurve_scan_step_forward(ctx, true))
+	if (zcurve_scan_step_forward(ctx, true, false))
 	{
 		int ret = (bitKey_cmp(&ctx->next_val_, check_val) <= 0) ? 1 : 0;
 		/* if it is in subquery range, return true */
