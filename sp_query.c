@@ -228,7 +228,7 @@ spt_query2_moveNext (spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 				return 0;
 			}
 
-			if (!spt_query2_getNTestNextRawKey(q, true))
+			if (!spt_query2_testRawKey(q))
 				break;
 
 			*iptr = q->iptr_;
@@ -290,18 +290,9 @@ spt_query2_checkNextPage(spt_query2_t *q)
 
 /* reads next key and comares it with hikey datum, for solid queries only, optimisation */
 int
-spt_query2_getNTestNextRawKey(spt_query2_t *q, bool need_fetch)
+spt_query2_testRawKey(spt_query2_t *q)
 {
-	int cmp;
-	/* are there some interesting data in the index tree? */
-	//if (need_fetch && !spt_query2_queryNextKey(q))
-	//{
-	//	/* query diapason is exhausted, no more data, finished */
-	//	spt_query2_closeQuery(q);
-	//	return 0;
-	//}
-
-	cmp = DatumGetInt32(
+	int cmp = DatumGetInt32(
 		DirectFunctionCall2(
 			numeric_cmp,
 			q->qctx_.raw_val_,
@@ -368,7 +359,7 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 		{
 			if (q->queryHead_->solid_)
 			{
-				if (!spt_query2_getNTestNextRawKey(q, true))
+				if (!spt_query2_testRawKey(q))
 					break;
 
 				*iptr = q->iptr_;

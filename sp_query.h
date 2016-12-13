@@ -95,7 +95,7 @@ extern int spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointer
 extern int spt_query2_checkKey(spt_query2_t *q, uint32 *coords);
 
 /* reads next key and comares it with hikey datum, for solid queries only, optimisation */
-extern int spt_query2_getNTestNextRawKey(spt_query2_t *q, bool need_fetch);
+extern int spt_query2_testRawKey(spt_query2_t *q);
 
 /* 
   If cursor points not to the end of page just return OK.

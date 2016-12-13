@@ -310,6 +310,13 @@ bit3Key_fromLong(bitKey_t *pk, Datum dt)
 	divisor_int64 = Int64GetDatum((int64) (1ULL << 48));
 	divisor_numeric = DirectFunctionCall1(int8_numeric, divisor_int64);
 
+//	low_result = DirectFunctionCall2(numeric_mod, dt, divisor_numeric);
+//	upper_result = DirectFunctionCall2(numeric_div_trunc, dt, divisor_numeric);
+//	pk->vals_[0] = DatumGetInt64(DirectFunctionCall1(numeric_int8, low_result));
+//	pk->vals_[1] = DatumGetInt64(DirectFunctionCall1(numeric_int8, upper_result));
+
+//	divisor_numeric = DirectFunctionCall1(int8_numeric, divisor_int64);
+
 	low_result = DirectFunctionCall2(numeric_mod, dt, divisor_numeric);
 	upper_result = DirectFunctionCall2(numeric_div_trunc, dt, divisor_numeric);
 	pk->vals_[0] = DatumGetInt64(DirectFunctionCall1(numeric_int8, low_result));

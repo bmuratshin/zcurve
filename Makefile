@@ -5,7 +5,7 @@ MODULE_big = zcurve
 OBJS = zcurve.o sp_tree.o bitkey.o list_sort.o sp_query.o $(WIN32RES)
 
 EXTENSION = zcurve
-DATA = zcurve--1.2.sql zcurve--unpackaged-1.2.sql
+DATA = zcurve--1.3.sql zcurve--unpackaged-1.3.sql
 PGFILEDESC = "zcurve - bit interleaving stuff"
 
 ifdef USE_PGXS

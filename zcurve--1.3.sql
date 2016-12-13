@@ -1,4 +1,4 @@
-/* contrib/zcurve/zcurve--1.2.sql */
+/* contrib/zcurve/zcurve--1.3.sql */
 
 -- complain if script is sourced in psql, rather than via CREATE EXTENSION
 \echo Use "CREATE EXTENSION zcurve" to load this file. \quit
@@ -31,6 +31,16 @@ LANGUAGE C IMMUTABLE STRICT;
 CREATE TYPE __ret_3d_lookup AS (c_tid TID, x integer, y integer, z integer);
 CREATE FUNCTION zcurve_3d_lookup(text, integer, integer, integer, integer, integer, integer)
 RETURNS SETOF __ret_3d_lookup
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION zcurve_2d_lookup_tidonly(text, integer, integer, integer, integer)
+RETURNS SETOF TID
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION zcurve_3d_lookup_tidonly(text, integer, integer, integer, integer, integer, integer)
+RETURNS SETOF TID
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE STRICT;
 

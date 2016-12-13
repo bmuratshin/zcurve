@@ -146,6 +146,9 @@ typedef struct p2d_ctx_s {
 	gen_list_t 	*result_;	/* head og resulting list */
 	gen_list_t 	*cur_;		/* current item for out */
 	int 		cnt_;		/* resulting list length */
+
+	res_item_t	cur_item_;	/* current item in a non-sorting mode */
+	int 		ret_;		/* the result of the last zcurve call */
 } p2d_ctx_t;
 
 
@@ -180,6 +183,83 @@ p2d_ctx_t_DTOR(p2d_ctx_t *ptr)
 	spt_query2_DTOR (&ptr->qdef_);
 }
 
+static Datum
+zcurve_Xd_lookup_tidonly(FunctionCallInfo fcinfo, char *relname, int ndim, uint32 *left_bottom, uint32 *right_upper)
+{
+	/* SRF stuff */
+	FuncCallContext     *funcctx = NULL;
+	p2d_ctx_t 	    *pctx = NULL;
+
+	/* params */
+  	uint32 x0  = left_bottom[0];
+	uint32 y0  = left_bottom[1];
+	uint32 z0  = left_bottom[2];
+	uint32 x1  = right_upper[0];
+	uint32 y1  = right_upper[1];
+	uint32 z1  = right_upper[2];
+	MemoryContext   oldcontext;
+
+	if (SRF_IS_FIRSTCALL())
+	{
+		uint32 coords[ZKEY_MAX_COORDS] = {x0, y0, z0};
+		uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1};
+		ItemPointerData iptr;
+
+		funcctx = SRF_FIRSTCALL_INIT();
+		funcctx->max_calls = 10000000;
+
+		/* lets start lookup, storing intermediate data in context list */
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+		/* prepare lookup context */
+		pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
+		p2d_ctx_t_CTOR(pctx, relname, coords, coords2, 3);
+
+		funcctx->user_fctx = pctx;
+		/* performing spatial cursor forwarding */
+		pctx->ret_ = spt_query2_moveFirst(&pctx->qdef_, coords, &iptr);
+		if (pctx->ret_)
+		{
+			pctx->cur_item_.iptr_ = iptr;
+			pctx->cnt_++;
+		}
+	}
+	else
+	{
+		ItemPointerData iptr;
+		uint32 coords[ZKEY_MAX_COORDS];
+
+		funcctx = SRF_PERCALL_SETUP();
+		oldcontext = MemoryContextSwitchTo(funcctx->multi_call_memory_ctx);
+
+		pctx = (p2d_ctx_t *) funcctx->user_fctx;
+		pctx->ret_ = spt_query2_moveNext(&pctx->qdef_, coords, &iptr);
+		if (pctx->ret_)
+		{
+			pctx->cur_item_.iptr_ = iptr;
+			pctx->cnt_++;
+		}
+	}
+
+	PG_FREE_IF_COPY(relname, 0);
+	pctx = (p2d_ctx_t *) funcctx->user_fctx;
+	{
+		/* while the end of result list is not reached */
+		if (pctx->ret_)
+		{
+			MemoryContextSwitchTo(oldcontext);
+			SRF_RETURN_NEXT(funcctx, PointerGetDatum(&pctx->cur_item_.iptr_));
+		}
+		else
+		{
+			/* no more data, free resources and stop lookup */
+			p2d_ctx_t_DTOR(pctx);
+		}	
+	}
+	pfree(pctx);
+	MemoryContextSwitchTo(oldcontext);
+	SRF_RETURN_DONE(funcctx);
+}
 
 PG_FUNCTION_INFO_V1(zcurve_2d_lookup);
 Datum
@@ -292,6 +372,7 @@ zcurve_2d_lookup(PG_FUNCTION_ARGS)
 	pfree(pctx);
 	SRF_RETURN_DONE(funcctx);
 }
+
 
 PG_FUNCTION_INFO_V1(zcurve_3d_lookup);
 Datum
@@ -410,4 +491,40 @@ zcurve_3d_lookup(PG_FUNCTION_ARGS)
 	pfree(pctx);
 	SRF_RETURN_DONE(funcctx);
 }
+
+PG_FUNCTION_INFO_V1(zcurve_2d_lookup_tidonly);
+Datum
+zcurve_2d_lookup_tidonly(PG_FUNCTION_ARGS)
+{
+	/* params */
+	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
+  	uint64 x0  = PG_GETARG_INT64(1);
+	uint64 y0  = PG_GETARG_INT64(2);
+	uint64 x1  = PG_GETARG_INT64(3);
+	uint64 y1  = PG_GETARG_INT64(4);
+	uint32 coords[ZKEY_MAX_COORDS] = {x0, y0};
+	uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1};
+
+	return zcurve_Xd_lookup_tidonly(fcinfo, relname, 2, coords, coords2);
+}
+
+PG_FUNCTION_INFO_V1(zcurve_3d_lookup_tidonly);
+Datum
+zcurve_3d_lookup_tidonly(PG_FUNCTION_ARGS)
+{
+	/* params */
+	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
+  	uint64 x0  = PG_GETARG_INT64(1);
+	uint64 y0  = PG_GETARG_INT64(2);
+	uint64 z0  = PG_GETARG_INT64(3);
+	uint64 x1  = PG_GETARG_INT64(4);
+	uint64 y1  = PG_GETARG_INT64(5);
+	uint64 z1  = PG_GETARG_INT64(6);
+	uint32 coords[ZKEY_MAX_COORDS] = {x0, y0, z0};
+	uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1};
+
+	return zcurve_Xd_lookup_tidonly(fcinfo, relname, 3, coords, coords2);
+
+}
+
 
