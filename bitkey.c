@@ -13,6 +13,11 @@
 #include "utils/builtins.h"
 #include "bitkey.h"
 
+#define WITH_HACKED_NUMERIC
+#ifdef WITH_HACKED_NUMERIC
+#include "ex_numeric.h"
+#endif
+
 /* 2D -------------------------------------------------------------------------------------------------------- */
 
 static uint32 stoBits[8] = {
@@ -296,26 +301,57 @@ bit3Key_clearLowBits(bitKey_t *pk, int idx)
 	}
 }
 
+#ifdef WITH_HACKED_NUMERIC
+static void test_numeric(const Numeric pvar, uint32_t *xdata)
+{
+	const int n = NUMERIC_NDIGITS(pvar);
+	int i,j;
+	int16_t *sdata = NUMERIC_DIGITS(pvar);
+
+	/*elog(INFO, "NDIGITS=%d WEIGHT=%d DSCALE=%d SIGN=%d", (int)NUMERIC_NDIGITS(pvar), (int)NUMERIC_WEIGHT(pvar), (int)NUMERIC_DSCALE(pvar), (int)NUMERIC_SIGN(pvar));*/
+
+	xdata[0] = xdata[1] = xdata[2] = xdata[3] = 0;
+	for (i = 0; i < n; i++)
+	{
+		int64_t ch = sdata[i];
+		for (j = 0; j < 4; j++)
+		{
+			int64_t val = ((int64_t)xdata[j]) * 10000;
+			val += ch;
+			xdata[j] = val & 0xffffffff;
+			ch = val >> 32;
+		}
+	}
+}
+#endif
 
 static void
 bit3Key_fromLong(bitKey_t *pk, Datum dt)
 {
+#ifdef WITH_HACKED_NUMERIC
+	uint32_t 	xdata[8];
+	const int n = NUMERIC_NDIGITS(DatumGetNumeric(dt));
+
+	Assert(NULL != pk);
+	if (n < 5)
+	{
+		pk->vals_[0] = DatumGetInt64(DirectFunctionCall1(numeric_int8, dt));
+		pk->vals_[1] = 0;
+		return;
+	}
+
+	test_numeric(DatumGetNumeric(dt), xdata);
+	pk->vals_[0] = (((uint64_t)xdata[1]) << 32) + xdata[0];
+	pk->vals_[1] = (((uint64_t)xdata[3]) << 32) + xdata[2];
+	return;
+#else
 	Datum		divisor_numeric;
 	Datum		divisor_int64;
 	Datum		low_result;
 	Datum		upper_result;
 
-	Assert(NULL != pk);
-
 	divisor_int64 = Int64GetDatum((int64) (1ULL << 48));
 	divisor_numeric = DirectFunctionCall1(int8_numeric, divisor_int64);
-
-//	low_result = DirectFunctionCall2(numeric_mod, dt, divisor_numeric);
-//	upper_result = DirectFunctionCall2(numeric_div_trunc, dt, divisor_numeric);
-//	pk->vals_[0] = DatumGetInt64(DirectFunctionCall1(numeric_int8, low_result));
-//	pk->vals_[1] = DatumGetInt64(DirectFunctionCall1(numeric_int8, upper_result));
-
-//	divisor_numeric = DirectFunctionCall1(int8_numeric, divisor_int64);
 
 	low_result = DirectFunctionCall2(numeric_mod, dt, divisor_numeric);
 	upper_result = DirectFunctionCall2(numeric_div_trunc, dt, divisor_numeric);
@@ -323,6 +359,13 @@ bit3Key_fromLong(bitKey_t *pk, Datum dt)
 	pk->vals_[1] = DatumGetInt64(DirectFunctionCall1(numeric_int8, upper_result));
 	pk->vals_[0] |= (pk->vals_[1] & 0xffff) << 48;
 	pk->vals_[1] >>= 16;
+#endif
+#if 0
+	if ((pk->vals_[0] & 0xffffffff) != xdata[0])
+	{
+		elog(ERROR, "bitKey <%lx %lx %lx vs %x %x %x>", pk->vals_[0], pk->vals_[1], pk->vals_[2], xdata[0], xdata[1], xdata[2]);
+	}
+#endif
 }
 
 static Datum
