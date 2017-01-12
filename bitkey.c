@@ -1,17 +1,44 @@
 /*
+ * Copyright (c) 2016...2017, Alex Artyushin, Boris Muratshin
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * The names of the authors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
  * contrib/zcurve/bitkey.c
  *
  *
  * bitkey.c -- spatial key operations
  *		
  *
- * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
+ * Author:	Boris Muratshin, mailto:bmuratshin@gmail.com
+ *
  */
 
 #include "postgres.h"
 #include "utils/numeric.h"
 #include "utils/builtins.h"
 #include "bitkey.h"
+#include "hilbert2.h"
 
 #define WITH_HACKED_NUMERIC
 #ifdef WITH_HACKED_NUMERIC
@@ -495,22 +522,126 @@ static void  bitKey_CTOR3(bitKey_t *pk)
 }
 
 
-/*------------------------------------------------------------------------------------*/
-void  bitKey_CTOR (bitKey_t *pk, int ncoords)
+/*-- Hilbert2D ----------------------------------------------------------------------------------*/
+
+static void 
+hilb2Key_fromCoords (bitKey_t *pk, const uint32 *coords, int n)
+{
+	uint32 res[2] = {0,0};
+	Assert(NULL != pk && NULL != coords && n >= 2);
+	hilbert_c2i(2, 30, coords, res);
+	pk->vals_[0] = res[0] + (((uint64)res[1]) << 32);
+}
+
+static void 
+hilb2Key_toCoords (const bitKey_t *pk, uint32 *coords, int n)
+{
+	uint32 res[2] = {
+		(uint32)pk->vals_[0],
+		(uint32)(pk->vals_[1] >> 32)};
+	Assert(NULL != pk && NULL != coords && n >= 2);
+	hilbert_i2c(2, 30, res, coords);
+}
+
+static zkey_vtab_t hilb2_vtab_ = {
+	bit2Key_cmp,
+	bit2Key_between,
+	bit2Key_getBit,
+	bit2Key_clearKey,
+	bit2Key_setLowBits,
+	bit2Key_clearLowBits,
+	bit2Key_fromLong,
+	bit2Key_toLong,
+	hilb2Key_fromCoords,
+	hilb2Key_toCoords,
+	bit2Key_toStr,
+};
+
+static void  hilbKey_CTOR2(bitKey_t *pk)
 {
 	Assert(pk);
-	switch (ncoords) {
-		case 2: 
+	memset(pk->vals_, 0, sizeof(pk->vals_));
+	pk->vtab_ = &hilb2_vtab_;
+}
+
+/*-- Hilbert3D ----------------------------------------------------------------------------------*/
+static void 
+hilb3Key_fromCoords (bitKey_t *pk, const uint32 *coords, int n)
+{
+	uint32 res[3] = {0,0,0};
+	Assert(NULL != pk && NULL != coords && n >= 3);
+	hilbert_c2i(3, 30, coords, res);
+	pk->vals_[0] = res[0] + (((uint64)res[1]) << 32);
+	pk->vals_[1] = res[2];
+}
+
+static void 
+hilb3Key_toCoords (const bitKey_t *pk, uint32 *coords, int n)
+{
+	uint32 res[3] = {
+		(uint32)pk->vals_[0],
+		(uint32)(pk->vals_[1] >> 32),
+		(uint32)pk->vals_[2]};
+	Assert(NULL != pk && NULL != coords && n >= 3);
+	hilbert_i2c(3, 30, res, coords);
+}
+
+static zkey_vtab_t hilb3_vtab_ = {
+	bit3Key_cmp,
+	bit3Key_between,
+	bit3Key_getBit,
+	bit3Key_clearKey,
+	bit3Key_setLowBits,
+	bit3Key_clearLowBits,
+	bit3Key_fromLong,
+	bit3Key_toLong,
+	hilb3Key_fromCoords,
+	hilb3Key_toCoords,
+	bit3Key_toStr,
+};
+
+static void  hilbKey_CTOR3(bitKey_t *pk)
+{
+	Assert(pk);
+	memset(pk->vals_, 0, sizeof(pk->vals_));
+	pk->vtab_ = &hilb3_vtab_;
+}
+
+/*--- iface ---------------------------------------------------------------------------------*/
+void  bitKey_CTOR (bitKey_t *pk, bitkey_type ktype)
+{
+	Assert(pk);
+	switch (ktype) {
+		case btZ2D: 
 			bitKey_CTOR2(pk);
 			break;
-		case 3:
+		case btZ3D: 
 			bitKey_CTOR3(pk);
 			break;
+		case btHilb2D: 
+			hilbKey_CTOR2(pk);
+			break;
+		case btHilb3D: 
+			hilbKey_CTOR3(pk);
+			break;
 		default:
-			elog(ERROR, "bitKey for %d coordinates has not been yet realized", ncoords);
-			;
+			elog(ERROR, "bitKey for '%d' type has not been yet realized", ktype);
 	};
 }
+
+unsigned bitKey_getNCoords(bitkey_type ktype)
+{
+	switch (ktype) {
+		case btZ2D: 	return 2;
+		case btZ3D: 	return 3;
+		case btHilb2D:	return 2;
+		case btHilb3D:	return 3;
+		default:
+			elog(ERROR, "bitKey for '%d' type has not been yet realized", ktype);
+	};
+	return 0;
+}
+
 
 int   bitKey_cmp (const bitKey_t *l, const bitKey_t *r)
 {

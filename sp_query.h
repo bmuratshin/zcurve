@@ -1,11 +1,37 @@
 /*
+ * Copyright (c) 2016...2017, Alex Artyushin, Boris Muratshin
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * The names of the authors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
  * contrib/zcurve/sp_query.h
  *
  *
  * sp_query.h -- spatial lookup stuff
  *		
  *
- * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
+ * Author:	Boris Muratshin, mailto:bmuratshin@gmail.com
+ *
  */
 #ifndef __ZCURVE_SPATIAL_INDEX_H
 #define __ZCURVE_SPATIAL_INDEX_H
@@ -19,7 +45,8 @@ typedef struct spatial2Query_s {
 	bitKey_t highKey_;	/* the end of index interval */
 	unsigned curBitNum_ : 16;		/* the number of key bit that will be used to split this one to subqueries (if necessary, sure) */
 	unsigned solid_ : 1;	/* hypercube flag */
-	unsigned ncoords_ : 3;	/* domension */
+	unsigned ncoords_ : 3;	/* dimension */
+	unsigned keytype_ : 4;	/* kind of keytype */
 	Datum    dhighKey_;	/* the same as high_key_ but in numeric for, solid requests only, optimisation */
 	struct spatial2Query_s *prevQuery_; 	/* pointer to subqueries queue */
 } spatial2Query_t;
@@ -28,7 +55,8 @@ typedef struct spatial2Query_s {
 typedef struct spt_query2_s {
 	uint32 min_point_[ZKEY_MAX_COORDS];	/* lookup extent left bottom corner, debug only */
 	uint32 max_point_[ZKEY_MAX_COORDS];	/* lookup extent upper right corner, debug only */
-	int ncoords_;
+	unsigned ncoords_;			/* dimension */
+	unsigned keytype_;			/* kind of keytype */
 
 	spatial2Query_t *queryHead_;		/* subqueries queue */
 	spatial2Query_t *freeHead_;		/* finished subqueries are reused */
@@ -43,7 +71,7 @@ typedef struct spt_query2_s {
 } spt_query2_t;
 
 /* constructor */
-extern void spt_query2_CTOR (spt_query2_t *ps, Relation rel, const uint32 *min_coords, const uint32 *max_coords, int ncoords);
+extern void spt_query2_CTOR (spt_query2_t *ps, Relation rel, const uint32 *min_coords, const uint32 *max_coords, bitkey_type ktype);
 
 /* destructor */
 extern void spt_query2_DTOR (spt_query2_t *ps);

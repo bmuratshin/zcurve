@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2016...2017, Alex Artyushin, Boris Muratshin
+ * Copyright (c) 2016, Alex Artyushin, Boris Muratshin
  * All rights reserved.
  * 
  * Redistribution and use in source and binary forms, with or without
@@ -23,22 +23,3 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-/*
- * contrib/zcurve/gen_list.h
- *
- *
- * gen_list.h -- generic list declaration
- *		
- *
- * Author:	Boris Muratshin, mailto:bmuratshin@gmail.com
- */
-
-#ifndef __ZCURVE_GEN_LIST_H
-#define __ZCURVE_GEN_LIST_H
-
-typedef struct gen_list_s {
-	struct gen_list_s *next;
-	void		  *data;
-} gen_list_t;
-
-#endif /*__ZCURVE_GEN_LIST_H*/

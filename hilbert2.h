@@ -24,21 +24,63 @@
  * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 /*
- * contrib/zcurve/gen_list.h
+ * contrib/zcurve/hilbert2.h
  *
  *
- * gen_list.h -- generic list declaration
+ * hilbert2.h -- Hilbert curve, adopted for an arbitrary lenght, up to 8X30 = 240 bits
  *		
  *
- * Author:	Boris Muratshin, mailto:bmuratshin@gmail.com
  */
 
-#ifndef __ZCURVE_GEN_LIST_H
-#define __ZCURVE_GEN_LIST_H
+/* C header file for Hilbert curve functions */
+#if !defined(_hilbert2_h_)
+#define _hilbert2_h_
 
-typedef struct gen_list_s {
-	struct gen_list_s *next;
-	void		  *data;
-} gen_list_t;
+#include <stdint.h>
 
-#endif /*__ZCURVE_GEN_LIST_H*/
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+
+	/*****************************************************************
+	* TAG( hilbert_i2c )
+	*
+	* Convert an index into a Hilbert curve to a set of coordinates.
+	* Inputs:
+	* 	n:	Number of coordinate axes.
+	* 	m:	Number of bits per axis.
+	* 	r:	The index, contains n*m bits (so n*m must be <= 240).
+	* Outputs:
+	* 	a:	The list of n coordinates, each with m bits.
+	* Assumptions:
+	* 	n*m < (sizeof r) * (bits_per_byte), n <= 8, m <= 30.
+	* Algorithm:
+	* 	From A. R. Butz, "Alternative Algorithm for Hilbert's
+	* 		Space-Filling Curve", IEEE Trans. Comp., April, 1971,
+	* 		pp 424-426.
+	*/
+	void hilbert_i2c(int n, int m, const uint32_t r[], uint32_t a[]);
+
+	/*****************************************************************
+	* TAG( hilbert_c2i )
+	*
+	* Convert coordinates of a point on a Hilbert curve to its index.
+	* Inputs:
+	* 	n:	Number of coordinates.
+	* 	m:	Number of bits/coordinate.
+	* 	a:	Array of n m-bit coordinates.
+	* Outputs:
+	* 	r:	Output index value.  n*m bits.
+	* Assumptions:
+	* 	n*m <= 240, n <= 8, m <= 30.
+	* Algorithm:
+	* 	Invert the above.
+	*/
+	void hilbert_c2i(int n, int m, const uint32_t a[], uint32_t r[]);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* _hilbert2_h_ */

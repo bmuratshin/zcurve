@@ -1,0 +1,20 @@
+This is an Z-curve based spatial index.
+
+NOTICE:
+     This version will work only with postgresql version 9.5 and above.
+
+INSTALLATION:
+
+  -- build and install
+  gmake USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config
+  gmake USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config install
+  -- load extension
+  psql -c "CREATE EXTENSION zcurve;" <database>
+
+The 'make' program must be compatible with GNU make.
+
+For more information, have a look at 
+	https://habrahabr.ru/post/319096/
+
+Have a lot of fun!
+

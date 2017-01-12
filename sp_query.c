@@ -1,11 +1,37 @@
 /*
+ * Copyright (c) 2016...2017, Alex Artyushin, Boris Muratshin
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * The names of the authors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
  * contrib/zcurve/sp_query.c
  *
  *
  * sp_query.c -- spatial lookup stuff
  *		
  *
- * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
+ * Author:	Boris Muratshin, mailto:bmuratshin@gmail.com
+ *
  */
 #include "postgres.h"
 
@@ -29,12 +55,14 @@
 
 /* constructor */
 void 
-spt_query2_CTOR (spt_query2_t *ps, Relation rel, const uint32 *min_coords, const uint32 *max_coords, int ncoords)
+spt_query2_CTOR (spt_query2_t *ps, Relation rel, const uint32 *min_coords, const uint32 *max_coords, bitkey_type ktype)
 {
 	int i;
+	unsigned ncoords = bitKey_getNCoords(ktype);
 	Assert(NULL != ps && ncoords < ZKEY_MAX_COORDS);
 
 	ps->ncoords_ = ncoords;
+	ps->keytype_ = ktype;
 	ps->queryHead_ = NULL;
 	ps->freeHead_ = NULL;
 
@@ -44,11 +72,11 @@ spt_query2_CTOR (spt_query2_t *ps, Relation rel, const uint32 *min_coords, const
 		ps->max_point_[i] = max_coords[i];
 	}
 
-	bitKey_CTOR(&ps->currentKey_, ncoords);
-	bitKey_CTOR(&ps->lastKey_, ncoords);
+	bitKey_CTOR(&ps->currentKey_, ktype);
+	bitKey_CTOR(&ps->lastKey_, ktype);
 
 	/* tree cursor init */
-	zcurve_scan_ctx_CTOR(&ps->qctx_, rel, ncoords);
+	zcurve_scan_ctx_CTOR(&ps->qctx_, rel, ktype);
 }
 
 /* destructor */
@@ -76,9 +104,10 @@ spt_query2_createQuery(spt_query2_t *q)
 	ret->curBitNum_ = 0;
 	ret->solid_ = 0;
 	ret->ncoords_ = q->ncoords_;
+	ret->keytype_ = q->keytype_;
 	ret->prevQuery_ = NULL;
-	bitKey_CTOR(&ret->lowKey_, q->ncoords_);
-	bitKey_CTOR(&ret->highKey_, q->ncoords_);
+	bitKey_CTOR(&ret->lowKey_, q->keytype_);
+	bitKey_CTOR(&ret->highKey_, q->keytype_);
 	return ret;
 }
 

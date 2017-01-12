@@ -1,11 +1,37 @@
 /*
+ * Copyright (c) 2016...2017, Alex Artyushin, Boris Muratshin
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *     * Redistributions of source code must retain the above copyright
+ *       notice, this list of conditions and the following disclaimer.
+ *     * Redistributions in binary form must reproduce the above copyright
+ *       notice, this list of conditions and the following disclaimer in the
+ *       documentation and/or other materials provided with the distribution.
+ *     * The names of the authors may be used to endorse or promote products
+ *       derived from this software without specific prior written permission.
+ * 
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
+ * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
+ * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+ * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE FOR ANY
+ * DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
+ * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
+ * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
+ * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
+ * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+/*
  * contrib/zcurve/sp_tree.c
  *
  *
  * sp_tree.c -- low level operations with numbers and 2D ZCurve index realized as a regular btree
  *		
  *
- * Modified by Boris Muratshin, mailto:bmuratshin@gmail.com
+ * Author:	Boris Muratshin, mailto:bmuratshin@gmail.com
+ *
  */
 
 #include <string.h>
@@ -440,17 +466,17 @@ zcurve_scan_step_forward(zcurve_scan_ctx_t *ctx, bool preserve_position, bool ra
 
 /* constructing a scan context, it may be restarted later with other start_val */
 int 
-zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, int ncoords)
+zcurve_scan_ctx_CTOR(zcurve_scan_ctx_t *ctx, Relation rel, bitkey_type ktype)
 {
 	Assert(ctx && rel);
 	ctx->rel_ = rel;
-	bitKey_CTOR(&ctx->init_zv_, ncoords);
+	bitKey_CTOR(&ctx->init_zv_, ktype);
 	ScanKeyInit(&ctx->skey_, 1, BTLessStrategyNumber, F_INT8LE, bitKey_toLong(&ctx->init_zv_));
 	ctx->offset_ = 0;
 	ctx->max_offset_ = 0;
-	bitKey_CTOR(&ctx->cur_val_, ncoords);
-	bitKey_CTOR(&ctx->next_val_, ncoords);
-	bitKey_CTOR(&ctx->last_page_val_, ncoords);
+	bitKey_CTOR(&ctx->cur_val_, ktype);
+	bitKey_CTOR(&ctx->next_val_, ktype);
+	bitKey_CTOR(&ctx->last_page_val_, ktype);
 	ctx->buf_ = 0;
 	ctx->pstack_ = NULL;
 	return 1;
