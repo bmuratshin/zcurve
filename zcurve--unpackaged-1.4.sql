@@ -13,3 +13,4 @@ ALTER EXTENSION zcurve ADD FUNCTION zcurve_2d_lookup_tidonly(text, integer, inte
 ALTER EXTENSION zcurve ADD FUNCTION zcurve_3d_lookup_tidonly(text, integer, integer, integer, integer, integer, integer);
 ALTER EXTENSION zcurve ADD function hilbert_num_from_xy(integer, integer);
 ALTER EXTENSION zcurve ADD function hilbert_num_from_xyz(integer, integer, integer);
+ALTER EXTENSION zcurve ADD FUNCTION hilbert_3d_lookup_tidonly(text, integer, integer, integer, integer, integer, integer);

@@ -211,25 +211,25 @@ p2d_ctx_t_DTOR(p2d_ctx_t *ptr)
 }
 
 static Datum
-zcurve_Xd_lookup_tidonly(FunctionCallInfo fcinfo, char *relname, int ndim, uint32 *left_bottom, uint32 *right_upper)
+zcurve_Xd_lookup_tidonly(FunctionCallInfo fcinfo, char *relname, bitkey_type ktype, uint32 *left_bottom, uint32 *right_upper)
 {
 	/* SRF stuff */
 	FuncCallContext     *funcctx = NULL;
 	p2d_ctx_t 	    *pctx = NULL;
 
-	/* params */
+	/* params 
   	uint32 x0  = left_bottom[0];
 	uint32 y0  = left_bottom[1];
 	uint32 z0  = left_bottom[2];
 	uint32 x1  = right_upper[0];
 	uint32 y1  = right_upper[1];
-	uint32 z1  = right_upper[2];
+	uint32 z1  = right_upper[2];*/
 	MemoryContext   oldcontext;
 
 	if (SRF_IS_FIRSTCALL())
 	{
-		uint32 coords[ZKEY_MAX_COORDS] = {x0, y0, z0};
-		uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1};
+		uint32 coords[ZKEY_MAX_COORDS] = {0, 0, 0};
+		//uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1};
 		ItemPointerData iptr;
 
 		funcctx = SRF_FIRSTCALL_INIT();
@@ -240,7 +240,7 @@ zcurve_Xd_lookup_tidonly(FunctionCallInfo fcinfo, char *relname, int ndim, uint3
 
 		/* prepare lookup context */
 		pctx = (p2d_ctx_t*)palloc(sizeof(p2d_ctx_t));
-		p2d_ctx_t_CTOR(pctx, relname, coords, coords2, btZ3D);
+		p2d_ctx_t_CTOR(pctx, relname, left_bottom, right_upper, ktype);
 
 		funcctx->user_fctx = pctx;
 		/* performing spatial cursor forwarding */
@@ -532,7 +532,7 @@ zcurve_2d_lookup_tidonly(PG_FUNCTION_ARGS)
 	uint32 coords[ZKEY_MAX_COORDS] = {x0, y0};
 	uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1};
 
-	return zcurve_Xd_lookup_tidonly(fcinfo, relname, 2, coords, coords2);
+	return zcurve_Xd_lookup_tidonly(fcinfo, relname, btZ2D, coords, coords2);
 }
 
 PG_FUNCTION_INFO_V1(zcurve_3d_lookup_tidonly);
@@ -550,8 +550,7 @@ zcurve_3d_lookup_tidonly(PG_FUNCTION_ARGS)
 	uint32 coords[ZKEY_MAX_COORDS] = {x0, y0, z0};
 	uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1};
 
-	return zcurve_Xd_lookup_tidonly(fcinfo, relname, 3, coords, coords2);
-
+	return zcurve_Xd_lookup_tidonly(fcinfo, relname, btZ3D, coords, coords2);
 }
 
 
@@ -590,3 +589,21 @@ hilbert_num_from_xyz(PG_FUNCTION_ARGS)
    return ret;
 }
 
+
+PG_FUNCTION_INFO_V1(hilbert_3d_lookup_tidonly);
+Datum
+hilbert_3d_lookup_tidonly(PG_FUNCTION_ARGS)
+{
+	/* params */
+	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
+  	uint64 x0  = PG_GETARG_INT64(1);
+	uint64 y0  = PG_GETARG_INT64(2);
+	uint64 z0  = PG_GETARG_INT64(3);
+	uint64 x1  = PG_GETARG_INT64(4);
+	uint64 y1  = PG_GETARG_INT64(5);
+	uint64 z1  = PG_GETARG_INT64(6);
+	uint32 coords[ZKEY_MAX_COORDS] = {x0, y0, z0};
+	uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1};
+
+	return zcurve_Xd_lookup_tidonly(fcinfo, relname, btHilb3D, coords, coords2);
+}

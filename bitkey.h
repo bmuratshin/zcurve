@@ -39,16 +39,16 @@
 	typedef struct bitKey_s bitKey_t;
 	typedef struct zkey_vtab_s {
 		int(*f_cmp) (const bitKey_t *, const bitKey_t *);
-		bool(*f_between) (const bitKey_t *val, const bitKey_t *minval, const bitKey_t *maxval);
-		int(*f_getBit) (const bitKey_t *pk, int idx);
 		void(*f_clearKey) (bitKey_t *pk);
-		void(*f_setLowBits) (bitKey_t *pk, int idx);
-		void(*f_clearLowBits) (bitKey_t *pk, int idx);
 		void(*f_fromLong) (bitKey_t *pk, Datum numeric);
 		Datum(*f_toLong) (const bitKey_t *pk);
 		void(*f_fromCoords) (bitKey_t *pk, const uint32 *coords, int n);
 		void(*f_toCoords) (const bitKey_t *pk, uint32 *coords, int n);
 		void(*f_toStr) (const bitKey_t *pk, char *buf, int buflen);
+		void(*f_split) (const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low);
+		void(*f_limits_from_extent) (const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval);
+		bool(*f_isSolid) (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
+		bool(*f_hasSmth) (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
 	} zkey_vtab_t;
 
 
@@ -72,16 +72,16 @@ typedef enum bitkey_type {
 	extern void  	bitKey_CTOR(bitKey_t *pk, bitkey_type ktype);
 	extern unsigned bitKey_getNCoords(bitkey_type ktype);
 	extern int   	bitKey_cmp(const bitKey_t *, const bitKey_t *);
-	extern bool  	bitKey_between(const bitKey_t *val, const bitKey_t *minval, const bitKey_t *maxval);
-	extern int   	bitKey_getBit(const bitKey_t *pk, int idx);
 	extern void  	bitKey_clearKey(bitKey_t *pk);
-	extern void  	bitKey_setLowBits(bitKey_t *pk, int idx);
-	extern void  	bitKey_clearLowBits(bitKey_t *pk, int idx);
 	extern void  	bitKey_fromLong(bitKey_t *pk, Datum dt);
 	extern Datum 	bitKey_toLong(const bitKey_t *pk);
 	extern void  	bitKey_fromCoords(bitKey_t *pk, const uint32 *coords, int n);
 	extern void  	bitKey_toCoords(const bitKey_t *pk, uint32 *coords, int n);
 	extern void  	bitKey_toStr(const bitKey_t *pk, char *buf, int buflen);
+	extern void 	bitKey_split(const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low);
+	extern void  	bitKey_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval);
+	extern bool	bitKey_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
+	extern bool	bitKey_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
 
 
 #endif /* __ZCURVE_BITKEY_H */

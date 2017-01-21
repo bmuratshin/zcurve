@@ -101,7 +101,7 @@ spt_query2_createQuery(spt_query2_t *q)
 		return retval;
 	}
 	ret = (spatial2Query_t *)palloc(sizeof(spatial2Query_t));
-	ret->curBitNum_ = 0;
+	/*ret->curBitNum_ = 0;*/
 	ret->solid_ = 0;
 	ret->ncoords_ = q->ncoords_;
 	ret->keytype_ = q->keytype_;
@@ -120,7 +120,7 @@ spt_query2_freeQuery (spt_query2_t *q, spatial2Query_t *sq)
 	q->freeHead_ = sq;
 }
 
-
+/*
 static int 
 Log2(int n)
 {
@@ -130,11 +130,12 @@ Log2(int n)
 		| !!(n & 0xCCCCCCCC) << 1
 		| !!(n & 0xAAAAAAAA);
 }
-
+*/
 /* testing for query is solid - no additional splitting etc, just out data */
 void
-spt_query2_testSolidity (spatial2Query_t *q)
+spt_query2_testSolidity (spt_query2_t *qdef, spatial2Query_t *q)
 {
+/*
 	uint32_t lcoords[ZKEY_MAX_COORDS];
 	uint32_t hcoords[ZKEY_MAX_COORDS];
 	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
@@ -166,7 +167,8 @@ spt_query2_testSolidity (spatial2Query_t *q)
 	if (0 == vol)
 	{
 		ok = 0;
-	}
+	}*/
+	int ok = bitKey_isSolid (qdef->min_point_, qdef->max_point_, &q->lowKey_, &q->highKey_);
 	q->solid_ = ok;
 	if (ok)
 	{
@@ -219,12 +221,10 @@ spt_query2_moveFirst(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 
 	q->queryHead_ = spt_query2_createQuery (q);
 	q->queryHead_->prevQuery_ = NULL;
-	q->queryHead_->curBitNum_ = ((32 * q->ncoords_) - 1);
 
-	bitKey_fromCoords(&q->queryHead_->lowKey_, q->min_point_, ZKEY_MAX_COORDS); 
-	bitKey_fromCoords(&q->queryHead_->highKey_, q->max_point_, ZKEY_MAX_COORDS);
+	bitKey_limits_from_extent(q->min_point_, q->max_point_, &q->queryHead_->lowKey_, &q->queryHead_->highKey_);
 
-	spt_query2_testSolidity(q->queryHead_);
+	spt_query2_testSolidity(q, q->queryHead_);
 
 	return spt_query2_findNextMatch(q, coords, iptr);
 }
@@ -317,7 +317,7 @@ spt_query2_checkNextPage(spt_query2_t *q)
 	return 1;
 }
 
-/* reads next key and comares it with hikey datum, for solid queries only, optimisation */
+/* reads next key and compares it with hikey datum, for solid queries only, optimisation */
 int
 spt_query2_testRawKey(spt_query2_t *q)
 {
@@ -355,14 +355,6 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 		{
 			/* let's split query */
 			spatial2Query_t *subQuery = NULL;
-
-			/* decrease curBitNum till corresponding bits are equal in both diapason numbers */
-			while ( bitKey_getBit(&q->queryHead_->lowKey_, q->queryHead_->curBitNum_) == 
-				bitKey_getBit(&q->queryHead_->highKey_, q->queryHead_->curBitNum_))
-			{
-				q->queryHead_->curBitNum_--;
-			}
-
 			/* create neq subquery */
 			subQuery = spt_query2_createQuery (q);
 			/* push it to the queue */
@@ -371,17 +363,31 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 			subQuery->lowKey_ = q->queryHead_->lowKey_;
 			subQuery->highKey_ = q->queryHead_->highKey_;
 			/* cut diapason by curBitNum for new subquery */
-			bitKey_setLowBits(&subQuery->highKey_, q->queryHead_->curBitNum_);
 			/* cut diapason by curBitNum for old subquery */
-			bitKey_clearLowBits(&q->queryHead_->lowKey_, q->queryHead_->curBitNum_);
 			/* decrease bits pointers */
-			subQuery->curBitNum_ = --q->queryHead_->curBitNum_;
+			/*subQuery->curBitNum_ = q->queryHead_->curBitNum_ = */
+			bitKey_split(
+				&subQuery->lowKey_, &q->queryHead_->highKey_, 
+				&subQuery->highKey_, &q->queryHead_->lowKey_);
 
-			spt_query2_testSolidity(subQuery);
-			spt_query2_testSolidity(q->queryHead_);
+			spt_query2_testSolidity(q, subQuery);
+			spt_query2_testSolidity(q, q->queryHead_);
 
 			q->queryHead_ = subQuery;
 			q->subQueryFinished_ = 0;
+#if 0			
+			{
+				char buf[256];
+				bitKey_toStr(&q->queryHead_->lowKey_, buf, sizeof(buf));
+				elog(INFO, "aftersplit low %s", buf);
+				bitKey_toStr(&q->queryHead_->highKey_, buf, sizeof(buf));
+				elog(INFO, "aftersplit high %s", buf);
+				bitKey_toStr(&q->currentKey_, buf, sizeof(buf));
+				elog(INFO, "curkey %s", buf);
+				bitKey_toStr(&q->lastKey_, buf, sizeof(buf));
+				elog(INFO, "lastkey %s", buf);
+			}
+#endif
 		}
 
 		for (;;)
@@ -431,17 +437,21 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 int
 spt_query2_checkKey (spt_query2_t *q, uint32 *coords)
 {
-	const bitKey_t *lKey = &q->queryHead_->lowKey_;
-	const bitKey_t *hKey = &q->queryHead_->highKey_;
-
-	/* let's try our key is positioned in necessary diapason */
-	if (0 == q->queryHead_->solid_ && 
-	    0 == bitKey_between(&q->currentKey_, lKey, hKey))
-		return 0;
-
-	/* OK, return data */
 	Assert(coords);
-	bitKey_toCoords (&q->currentKey_, coords, ZKEY_MAX_COORDS);
+
+	bitKey_toCoords(&q->currentKey_, coords, ZKEY_MAX_COORDS);
+	/* let's try our key is positioned in necessary diapason */
+	if (0 == q->queryHead_->solid_)
+	{
+		unsigned i;
+		for (i = 0; i < q->ncoords_; i++)
+		{
+			if (coords[i] < q->min_point_[i] || coords[i] > q->max_point_[i])
+				return 0;
+		}
+	}
+	/* OK, return data */
+	elog(INFO, "Result:%d %d %d", coords[0], coords[1], coords[2]);
 	return 1;
 }
 

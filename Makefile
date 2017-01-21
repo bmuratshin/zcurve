@@ -1,6 +1,6 @@
 # contrib/zcurve/Makefile
 
-MODULE_big = zcurve
+MODULE_big = zcurve-1.4
 
 OBJS = zcurve.o sp_tree.o bitkey.o list_sort.o sp_query.o hilbert2.o $(WIN32RES)
 

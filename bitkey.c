@@ -45,6 +45,16 @@
 #include "ex_numeric.h"
 #endif
 
+static int 
+Log2(int n)
+{
+	return !!(n & 0xFFFF0000) << 4
+		| !!(n & 0xFF00FF00) << 3
+		| !!(n & 0xF0F0F0F0) << 2
+		| !!(n & 0xCCCCCCCC) << 1
+		| !!(n & 0xAAAAAAAA);
+}
+
 /* 2D -------------------------------------------------------------------------------------------------------- */
 
 static uint32 stoBits[8] = {
@@ -59,6 +69,7 @@ bit2Key_cmp (const bitKey_t *pl, const bitKey_t *pr)
 			((pl->vals_[0] > pr->vals_[0]) ? 1 : -1);
 }
 
+#if 0
 static bool  
 bit2Key_between (const bitKey_t *ckey, const bitKey_t *lKey, const bitKey_t *hKey)
 {
@@ -91,6 +102,7 @@ bit2Key_getBit (const bitKey_t *pk, int idx)
 	Assert(NULL != pk);
 	return (int)(pk->vals_[0] >> (idx & 0x3f));
 }
+#endif
 
 static void 
 bit2Key_clearKey (bitKey_t *pk)
@@ -197,19 +209,87 @@ bit2Key_toStr(const bitKey_t *pk, char *buf, int buflen)
 		(int)coords[1]);
 }
 
+static void
+bit2Key_split (const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low)
+{
+	int curBitNum = 32 * 2 - 1;
+	while ((low->vals_[0] >> curBitNum) == ((high->vals_[0] >> curBitNum)))
+	{
+		curBitNum--;
+	}
+	/* cut diapason by curBitNum for new subquery */
+	bit2Key_setLowBits(lower_high, curBitNum);
+	/* cut diapason by curBitNum for old subquery */
+	bit2Key_clearLowBits(upper_low, curBitNum);
+}
+
+static void  
+bit2Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval)
+{
+	bit2Key_fromCoords(minval, bl_coords, 2);
+	bit2Key_fromCoords(maxval, ur_coords, 2);
+}
+
+static bool  
+bit2Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+	uint32_t lcoords[ZKEY_MAX_COORDS];
+	uint32_t hcoords[ZKEY_MAX_COORDS];
+	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
+	uint64_t vol = 1;
+
+	bitKey_toCoords (minval, lcoords, ZKEY_MAX_COORDS);
+	bitKey_toCoords (maxval, hcoords, ZKEY_MAX_COORDS);
+
+	for (i=0; i < 2; i++)
+	{
+		dcoords[i] = hcoords[i] - lcoords[i];
+		vol *= (unsigned)(dcoords[i]);
+		if (dcoords[i]++)
+		{
+			diff = 1 << Log2(dcoords[i]);
+			if (diff != dcoords[i])
+			{
+				ok = 0;
+				break;
+			}
+			if (odiff && odiff != diff)
+			{
+				ok = 0;
+				break;
+			}
+			odiff = diff;
+		}
+	}
+	if (0 == vol)
+	{
+		ok = 0;
+	}
+	return ok != 0;
+}
+
+static bool  
+bit2Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+	return true;
+}
 
 static zkey_vtab_t key2_vtab_ = {
 	bit2Key_cmp,
-	bit2Key_between,
-	bit2Key_getBit,
+	/*bit2Key_between,
+	bit2Key_getBit,*/
 	bit2Key_clearKey,
-	bit2Key_setLowBits,
-	bit2Key_clearLowBits,
+	/*bit2Key_setLowBits,
+	bit2Key_clearLowBits,*/
 	bit2Key_fromLong,
 	bit2Key_toLong,
 	bit2Key_fromCoords,
 	bit2Key_toCoords,
 	bit2Key_toStr,
+	bit2Key_split,
+	bit2Key_limits_from_extent,
+	bit2Key_isSolid,
+	bit2Key_hasSmth,
 };
 
 static void  bitKey_CTOR2 (bitKey_t *pk)
@@ -233,6 +313,7 @@ bit3Key_cmp(const bitKey_t *pl, const bitKey_t *pr)
 	return 0;
 }
 
+#if 0
 static bool
 bit3Key_between(const bitKey_t *ckey, const bitKey_t *lKey, const bitKey_t *hKey)
 {
@@ -277,6 +358,7 @@ bit3Key_getBit(const bitKey_t *pk, int idx)
 	Assert(NULL != pk && idx < 96 && idx >= 0);
 	return (int)(pk->vals_[ix0] >> ix1);
 }
+#endif
 
 static void
 bit3Key_clearKey(bitKey_t *pk)
@@ -487,7 +569,7 @@ static void
 bit3Key_toStr(const bitKey_t *pk, char *buf, int buflen)
 {
 	uint32 coords[3];
-	bit2Key_toCoords (pk, coords, 3);
+	bit3Key_toCoords (pk, coords, 3);
 	Assert(pk && buf && buflen > 128);
 	sprintf(buf, "[%x %x %x]: %d %d %d", 
 		(int)(pk->vals_[1] & 0xffffffff),
@@ -498,20 +580,100 @@ bit3Key_toStr(const bitKey_t *pk, char *buf, int buflen)
 		(int)coords[2]);
 }
 
+static void
+bit3Key_split (const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low)
+{
+	int curBitNum = 32 * 3 - 1;
 
+	for (;curBitNum;curBitNum--)
+	{
+		int ix0 = curBitNum >> 6; 
+		int ix1 = curBitNum & 0x3f;
+		if ((low->vals_[ix0] >> ix1) != (high->vals_[ix0] >> ix1))
+			break;
+	}
+	/* cut diapason by curBitNum for new subquery */
+	bit3Key_setLowBits(lower_high, curBitNum);
+	/* cut diapason by curBitNum for old subquery */
+	bit3Key_clearLowBits(upper_low, curBitNum);
+}
+
+static void
+bit3Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval)
+{
+	bit3Key_fromCoords(minval, bl_coords, 3);
+	bit3Key_fromCoords(maxval, ur_coords, 3);
+}
+
+static bool  
+bit3Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+	uint32_t lcoords[ZKEY_MAX_COORDS];
+	uint32_t hcoords[ZKEY_MAX_COORDS];
+	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
+	uint64_t vol = 1;
+
+	bitKey_toCoords (minval, lcoords, ZKEY_MAX_COORDS);
+	bitKey_toCoords (maxval, hcoords, ZKEY_MAX_COORDS);
+
+	for (i=0; i < 3; i++)
+	{
+		dcoords[i] = hcoords[i] - lcoords[i];
+		vol *= (unsigned)(dcoords[i]);
+		if (dcoords[i]++)
+		{
+			diff = 1 << Log2(dcoords[i]);
+			if (diff != dcoords[i])
+			{
+				ok = 0;
+				break;
+			}
+			if (odiff && odiff != diff)
+			{
+				ok = 0;
+				break;
+			}
+			odiff = diff;
+		}
+	}
+	if (0 == vol)
+	{
+		ok = 0;
+	}
+#if 0
+	/* gnuplot line compatible output*/
+	elog(INFO, "%d %d",lcoords[0], lcoords[2]);
+	elog(INFO, "%d %d",lcoords[0], hcoords[2]);
+	elog(INFO, "%d %d",hcoords[0], hcoords[2]);
+	elog(INFO, "%d %d",hcoords[0], lcoords[2]);
+	elog(INFO, "%d %d %d %d %d %llu %c",lcoords[0], lcoords[2], dcoords[0], dcoords[1], dcoords[2], vol, ok?'*':' ');
+	elog(INFO, "");
+#endif
+	return ok != 0;
+}
+
+static bool  
+bit3Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+	return true;
+}
 
 static zkey_vtab_t key3_vtab_ = {
 	bit3Key_cmp,
-	bit3Key_between,
-	bit3Key_getBit,
+	/*bit3Key_between,
+	bit3Key_getBit,*/
 	bit3Key_clearKey,
-	bit3Key_setLowBits,
-	bit3Key_clearLowBits,
+	/*bit3Key_setLowBits,
+	bit3Key_clearLowBits,*/
 	bit3Key_fromLong,
 	bit3Key_toLong,
 	bit3Key_fromCoords,
 	bit3Key_toCoords,
 	bit3Key_toStr,
+	bit3Key_split,
+	bit3Key_limits_from_extent,
+	bit3Key_isSolid,
+	bit3Key_hasSmth,
 };
 
 static void  bitKey_CTOR3(bitKey_t *pk)
@@ -543,18 +705,39 @@ hilb2Key_toCoords (const bitKey_t *pk, uint32 *coords, int n)
 	hilbert_i2c(2, 30, res, coords);
 }
 
+static void
+hilb2Key_split(const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low)
+{
+	elog(ERROR, "hilb2Key_split not realized");
+}
+
+static void
+hilb2Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval)
+{
+	elog(ERROR, "bit3Key_limits_from_extent not realized");
+}
+
+static bool  
+hilb2Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+	return true;
+}
+
 static zkey_vtab_t hilb2_vtab_ = {
 	bit2Key_cmp,
-	bit2Key_between,
-	bit2Key_getBit,
+	/*bit2Key_between,
+	bit2Key_getBit,*/
 	bit2Key_clearKey,
-	bit2Key_setLowBits,
-	bit2Key_clearLowBits,
+	/*bit2Key_setLowBits,
+	bit2Key_clearLowBits,*/
 	bit2Key_fromLong,
 	bit2Key_toLong,
 	hilb2Key_fromCoords,
 	hilb2Key_toCoords,
 	bit2Key_toStr,
+	hilb2Key_split,
+	hilb2Key_limits_from_extent,
+	hilb2Key_isSolid,
 };
 
 static void  hilbKey_CTOR2(bitKey_t *pk)
@@ -580,24 +763,209 @@ hilb3Key_toCoords (const bitKey_t *pk, uint32 *coords, int n)
 {
 	uint32 res[3] = {
 		(uint32)pk->vals_[0],
-		(uint32)(pk->vals_[1] >> 32),
-		(uint32)pk->vals_[2]};
+		(uint32)(pk->vals_[0] >> 32),
+		(uint32)pk->vals_[1]};
 	Assert(NULL != pk && NULL != coords && n >= 3);
 	hilbert_i2c(3, 30, res, coords);
 }
 
+static int calcCurBit(uint32 l, uint32 r)
+{
+	int curBitNum = 31;
+
+	for (; curBitNum; curBitNum--)
+	{
+		if ((l >> curBitNum) != (r >> curBitNum))
+			return curBitNum;
+	}
+	return 0;
+}
+
+static int calcCurBit64(uint64 l, uint64 r)
+{
+	int curBitNum = 63;
+
+	for (; curBitNum; curBitNum--)
+	{
+		if ((l >> curBitNum) != (r >> curBitNum))
+			return curBitNum;
+	}
+	return 0;
+}
+
+static void
+hilb3Key_split(const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low)
+{
+	int i, cb;
+
+	if (low->vals_[1] != high->vals_[1])
+	{
+		cb = calcCurBit64(low->vals_[1], high->vals_[1]) + 64;
+	}
+	else
+	{
+		cb = calcCurBit64(low->vals_[0], high->vals_[0]);
+	}
+
+	*lower_high = *low;
+	*upper_low = *high;
+
+	i = 0;
+	if (cb > 64)
+	{
+		cb -= 64;
+		upper_low->vals_[0] = 0ULL;
+		upper_low->vals_[0] |= (1ULL << cb);
+		lower_high->vals_[0] = ~0ULL;
+		i = 1;
+	}
+	{
+		uint64 tmp = (1ULL << cb) - 1;
+		upper_low->vals_[i] &= ~tmp;
+		upper_low->vals_[i] |= (1ULL << cb);
+		lower_high->vals_[i] |= tmp;
+	}
+
+#if 0
+	{
+		static int cnt = 0;
+		uint32 tmp_coords[3];
+		uint32 tmp_coords2[3];
+		hilb3Key_toCoords(/*lower_*/high, tmp_coords2, 3);
+		hilb3Key_toCoords(/*upper_*/low, tmp_coords, 3);
+		elog(INFO, "%x %x %x <= %x %x %x", tmp_coords[0], tmp_coords[1], tmp_coords[2], tmp_coords2[0], tmp_coords2[1], tmp_coords2[2]);
+		
+		hilb3Key_toCoords(lower_high, tmp_coords, 3);
+		hilb3Key_toCoords(upper_low, tmp_coords2, 3);
+		elog(INFO, "%x %x %x => %x %x %x", tmp_coords[0], tmp_coords[1], tmp_coords[2], tmp_coords2[0], tmp_coords2[1], tmp_coords2[2]);
+		elog(INFO, "");
+
+		if (++cnt > 10)
+		{
+			//elog(ERROR, "Sic!");
+		}
+	}
+#endif
+}
+
+static void
+hilb3Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval)
+{
+	uint32 coords_low[3] = { bl_coords[0], bl_coords[1], bl_coords[2] };
+	uint32 coords_high[3] = { ur_coords[0], ur_coords[1], ur_coords[2] };
+	uint32 bits[3];
+	int i, max_bits = 0;
+
+	for (i = 0; i < 3; i++)
+	{
+		bits[i] = calcCurBit(bl_coords[i], ur_coords[i]) + 1;
+		if (bits[i] > max_bits)
+			max_bits = bits[i];
+	}
+
+	hilb3Key_fromCoords(minval, coords_low, 3);
+	hilb3Key_fromCoords(maxval, coords_high, 3);
+
+	max_bits *= 3;
+	i = 0;
+	if (max_bits > 64)
+	{
+		max_bits -= 64;
+		minval->vals_[0] = 0ULL;
+		maxval->vals_[0] = ~0ULL;
+		i = 1;
+	}
+	{
+		uint64 tmp = (1ULL << max_bits) - 1;
+		minval->vals_[i] &= ~tmp;
+		maxval->vals_[i] |= tmp;
+	}
+#if 0
+	{
+		uint32 tmp_coords[3];
+		uint32 tmp_coords2[3];
+		hilb3Key_toCoords(minval, tmp_coords, 3);
+		hilb3Key_toCoords(maxval, tmp_coords2, 3);
+		elog(INFO, "{%x %x %x => %x %x %x}", tmp_coords[0], tmp_coords[1], tmp_coords[2], tmp_coords2[0], tmp_coords2[1], tmp_coords2[2]);
+	}
+#endif
+}
+
+static void  
+hilb3Key_toStr(const bitKey_t *pk, char *buf, int buflen)
+{
+	uint32 coords[3];
+	hilb3Key_toCoords (pk, coords, 3);
+	Assert(pk && buf && buflen > 128);
+	sprintf(buf, "[%x %x %x]: %x %x %x", 
+		(int)(pk->vals_[1] & 0xffffffff),
+		(int)((pk->vals_[0] >> 32) & 0xffffffff),
+		(int)(pk->vals_[0] & 0xffffffff),
+		(int)coords[0],
+		(int)coords[1],
+		(int)coords[2]);
+}
+
+static bool  
+hilb3Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+#if 1
+	return false;
+#else
+	uint32_t lcoords[ZKEY_MAX_COORDS];
+	uint32_t hcoords[ZKEY_MAX_COORDS];
+	int i;
+
+	bitKey_toCoords (minval, lcoords, ZKEY_MAX_COORDS);
+	bitKey_toCoords (maxval, hcoords, ZKEY_MAX_COORDS);
+
+	for (i = 0; i < 3; i++)
+	{
+		if (lcoords[i] < bl_coords[i] || lcoords[i] > ur_coords[i])
+			return false;
+		if (hcoords[i] < bl_coords[i] || hcoords[i] > ur_coords[i])
+			return false;
+	}
+	return true;
+#endif
+}
+
+static bool  
+hilb3Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+#if 1
+	return true;
+#else
+	uint32_t lcoords[ZKEY_MAX_COORDS];
+	uint32_t hcoords[ZKEY_MAX_COORDS];
+	int i;
+
+	bitKey_toCoords (minval, lcoords, ZKEY_MAX_COORDS);
+	bitKey_toCoords (maxval, hcoords, ZKEY_MAX_COORDS);
+
+	for (i = 0; i < 3; i++)
+	{
+		if (lcoords[i] >= bl_coords[i] || lcoords[i] <= ur_coords[i])
+			return true;
+		if (hcoords[i] >= bl_coords[i] || hcoords[i] <= ur_coords[i])
+			return true;
+	}
+	return false;
+#endif
+}
+
 static zkey_vtab_t hilb3_vtab_ = {
 	bit3Key_cmp,
-	bit3Key_between,
-	bit3Key_getBit,
 	bit3Key_clearKey,
-	bit3Key_setLowBits,
-	bit3Key_clearLowBits,
 	bit3Key_fromLong,
 	bit3Key_toLong,
 	hilb3Key_fromCoords,
 	hilb3Key_toCoords,
-	bit3Key_toStr,
+	hilb3Key_toStr,
+	hilb3Key_split,
+	hilb3Key_limits_from_extent,
+	hilb3Key_isSolid,
+	hilb3Key_hasSmth,
 };
 
 static void  hilbKey_CTOR3(bitKey_t *pk)
@@ -650,6 +1018,7 @@ int   bitKey_cmp (const bitKey_t *l, const bitKey_t *r)
 	return l->vtab_->f_cmp(l, r);
 }
 
+#if 0
 bool  bitKey_between (const bitKey_t *val, const bitKey_t *minval, const bitKey_t *maxval)
 {
 	Assert(val && minval && maxval);
@@ -661,6 +1030,7 @@ int   bitKey_getBit (const bitKey_t *pk, int idx)
 	Assert(pk);
 	return pk->vtab_->f_getBit(pk, idx);
 }
+#endif
 
 void  bitKey_clearKey (bitKey_t *pk)
 {
@@ -668,6 +1038,7 @@ void  bitKey_clearKey (bitKey_t *pk)
 	pk->vtab_->f_clearKey(pk);
 }
 
+/*
 void  bitKey_setLowBits (bitKey_t *pk, int idx)
 {
 	Assert(pk);
@@ -679,6 +1050,7 @@ void  bitKey_clearLowBits (bitKey_t *pk, int idx)
 	Assert(pk);
 	pk->vtab_->f_clearLowBits(pk, idx);
 }
+*/
 
 void  bitKey_fromLong (bitKey_t *pk, Datum numeric)
 {
@@ -710,3 +1082,23 @@ void  bitKey_toStr(const bitKey_t *pk, char *buf, int buflen)
 	pk->vtab_->f_toStr(pk, buf, buflen);
 }
 
+void  bitKey_split(const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low)
+{
+	Assert(low && high && lower_high && upper_low);
+	Assert(low->vtab_ == high->vtab_ && lower_high->vtab_ == upper_low->vtab_ && low->vtab_ == upper_low->vtab_);
+	low->vtab_->f_split(low, high, lower_high, upper_low);
+}
+
+void  bitKey_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval)
+{
+	Assert(bl_coords && ur_coords && minval && maxval);
+	Assert(minval->vtab_ == maxval->vtab_);
+	minval->vtab_->f_limits_from_extent(bl_coords, ur_coords, minval, maxval);
+}
+
+bool  bitKey_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+	Assert(bl_coords && ur_coords && minval && maxval);
+	Assert(minval->vtab_ == maxval->vtab_);
+	return minval->vtab_->f_isSolid(bl_coords, ur_coords, minval, maxval);
+}

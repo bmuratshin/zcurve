@@ -53,3 +53,9 @@ CREATE FUNCTION hilbert_num_from_xyz(integer, integer, integer)
 RETURNS numeric
 AS 'MODULE_PATHNAME'
 LANGUAGE C IMMUTABLE STRICT;
+
+CREATE FUNCTION hilbert_3d_lookup_tidonly(text, integer, integer, integer, integer, integer, integer)
+RETURNS SETOF TID
+AS 'MODULE_PATHNAME'
+LANGUAGE C IMMUTABLE STRICT;
+
