@@ -1,0 +1,102 @@
+This is an Z-curve based spatial index.
+
+NOTICE:
+     This version will work only with postgresql version 9.5 and above.
+
+INSTALLATION:
+
+  -- build and install
+  gmake USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config
+  gmake USE_PGXS=1 PG_CONFIG=/usr/bin/pg_config install
+  -- load extension
+  psql -c "CREATE EXTENSION zcurve;" <database>
+
+The 'make' program must be compatible with GNU make.
+
+For more information, have a look at 
+
+RU:
+	https://habrahabr.ru/post/319096/
+	https://habrahabr.ru/post/319810/
+
+EN:
+	http://www.google.com/translate?hl=en&ie=UTF8&sl=auto&tl=en&u=https%3A%2F%2Fhabrahabr.ru%2Fpost%2F319096%2F
+	http://www.google.com/translate?hl=en&ie=UTF8&sl=auto&tl=en&u=https%3A%2F%2Fhabrahabr.ru%2Fpost%2F319810%2F
+
+--------------------------------------------------------------------------------------------------------------------------
+To test SQL 3D Z-curve interface (on built and registered extension) you need:
+1) Create points table (psql):
+	create table test_points_3d (x integer,y integer, z integer);
+2) Create test dataset:
+	2.1)    Make gawk script, let it be 'mkdata.awk':
+		BEGIN{
+		  for (i = 0; i < 100000000; i++)
+		  {
+		    x = int(1000000 * rand());
+		    z = int(1000000 * rand());
+		    print "("x",0,"z")";
+		  }
+		}
+
+	2.2)	Fill txt file with this script:
+		gawk -f mkdata.awk > data_3d.csv
+
+	3.3)	copy it into the table (psql)
+		COPY test_points_3d from '/home/.../postgresql/contrib/zcurve/data_3d.csv';
+
+3) Create index (psql):
+	create index zcurve_test_points_3d on test_points_3d(zcurve_num_from_xyz(x, y, z));
+
+4) Create test requests set:
+	4.1) Make gawk script, let it be 'mktest.awk':
+		BEGIN{
+		  for (i = 0; i < 100000; i++)
+		  {
+		    x = 1000 * int(1000 * rand());
+		    y = 0;
+		    z = 1000 * int(1000 * rand());
+		    #EXPLAIN (ANALYZE,BUFFERS) 
+		    print "select count(1) from zcurve_3d_lookup_tidonly('zcurve_test_points_3d', "x","y","z","x+1000","y+1000","z+1000");";
+		  }
+		}
+	     box 100X100X1000 gives us 100 points in average
+
+	2.2) Fill testing file with this script:
+		gawk -f mktest.awk > test_100.sql
+
+5) For getting times, run:
+	date; psql -f test_100.sql ; date;
+   and devide the difference into 100 000
+
+5) For getting reads, 
+	5.1) insert 'EXPLAIN (ANALYZE,BUFFERS)' into select preparation in gawk script:
+	5.2) run 'date; psql -f test_100.sql > 100.out ; date;' 
+	5.3) prepare gawk script (let it be 'buf.awk')
+		BEGIN {
+			FS="=";
+			num = 0;
+			sum = 0;
+			sum2 = 0;
+		}
+		if (NF==3)
+		{
+			sum += $3;
+			sum2 += $2;
+		}
+		else if (NF==2)
+		{
+			if ($1=="   Buffers: shared hit")
+				sum2 += $2;
+			else if ($1=="   Buffers: read")
+				sum += $2;
+		}
+		num++;
+		END {
+		 	print sum/(num)" "sum2/(num)" "num;
+		}		
+	5.4) run in over 100.out
+		gawk -f buf.awk 100.out 
+	5.5) first number in its output is 'shared reads', second - 'shared hits'
+--------------------------------------------------------------------------------------------------------------------------
+
+
