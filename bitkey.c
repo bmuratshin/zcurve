@@ -195,13 +195,15 @@ bit2Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bit
 	bit2Key_fromCoords(maxval, ur_coords, 2);
 }
 
-static bool  
-bit2Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+static unsigned  
+bit2Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
 {
 	uint32_t lcoords[ZKEY_MAX_COORDS];
 	uint32_t hcoords[ZKEY_MAX_COORDS];
-	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
+	int dcoords[ZKEY_MAX_COORDS], i, diff = 0, odiff = 0;
 	uint64_t vol = 1;
+	unsigned ok = baReadReady | baSolid;
+	uint32_t mask = 0;
 
 	bitKey_toCoords (minval, lcoords, ZKEY_MAX_COORDS);
 	bitKey_toCoords (maxval, hcoords, ZKEY_MAX_COORDS);
@@ -213,14 +215,17 @@ bit2Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 		if (dcoords[i]++)
 		{
 			diff = 1 << Log2(dcoords[i]);
-			if (diff != dcoords[i])
+			mask = diff - 1;
+			if (diff != dcoords[i] || 
+			    mask & hcoords[i] || 
+			    mask & lcoords[i])
 			{
-				ok = 0;
+				ok &= ~baSolid;
 				break;
 			}
 			if (odiff && odiff != diff)
 			{
-				ok = 0;
+				ok &= ~baSolid;
 				break;
 			}
 			odiff = diff;
@@ -230,7 +235,8 @@ bit2Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 	{
 		ok = 0;
 	}
-	return ok != 0;
+
+	return ok;
 }
 
 static bool  
@@ -241,11 +247,7 @@ bit2Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 
 static zkey_vtab_t key2_vtab_ = {
 	bit2Key_cmp,
-	/*bit2Key_between,
-	bit2Key_getBit,*/
 	bit2Key_clearKey,
-	/*bit2Key_setLowBits,
-	bit2Key_clearLowBits,*/
 	bit2Key_fromLong,
 	bit2Key_toLong,
 	bit2Key_fromCoords,
@@ -253,7 +255,7 @@ static zkey_vtab_t key2_vtab_ = {
 	bit2Key_toStr,
 	bit2Key_split,
 	bit2Key_limits_from_extent,
-	bit2Key_isSolid,
+	bit2Key_getAttr,
 	bit2Key_hasSmth,
 };
 
@@ -523,14 +525,16 @@ bit3Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bit
 	bit3Key_fromCoords(maxval, ur_coords, 3);
 }
 
-static bool  
-bit3Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+static unsigned
+bit3Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
 {
 	uint32_t lcoords[ZKEY_MAX_COORDS];
 	uint32_t hcoords[ZKEY_MAX_COORDS];
-	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
+	int dcoords[ZKEY_MAX_COORDS], i, diff = 0, odiff = 0;
 	uint64_t vol = 1;
-
+	unsigned ok = baReadReady | baSolid;
+	uint32_t mask = 0;
+	
 	bitKey_toCoords (minval, lcoords, ZKEY_MAX_COORDS);
 	bitKey_toCoords (maxval, hcoords, ZKEY_MAX_COORDS);
 
@@ -541,14 +545,17 @@ bit3Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 		if (dcoords[i]++)
 		{
 			diff = 1 << Log2(dcoords[i]);
-			if (diff != dcoords[i])
+			mask = diff - 1;
+			if (diff != dcoords[i] ||
+			    mask & hcoords[i] ||
+			    mask & lcoords[i])
 			{
-				ok = 0;
+				ok &= ~baSolid;
 				break;
 			}
 			if (odiff && odiff != diff)
 			{
-				ok = 0;
+				ok &= ~baSolid;
 				break;
 			}
 			odiff = diff;
@@ -567,7 +574,7 @@ bit3Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 	elog(INFO, "%d %d %d %d %d %llu %c",lcoords[0], lcoords[2], dcoords[0], dcoords[1], dcoords[2], vol, ok?'*':' ');
 	elog(INFO, "");
 #endif
-	return ok != 0;
+	return ok;
 }
 
 static bool  
@@ -578,11 +585,7 @@ bit3Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 
 static zkey_vtab_t key3_vtab_ = {
 	bit3Key_cmp,
-	/*bit3Key_between,
-	bit3Key_getBit,*/
 	bit3Key_clearKey,
-	/*bit3Key_setLowBits,
-	bit3Key_clearLowBits,*/
 	bit3Key_fromLong,
 	bit3Key_toLong,
 	bit3Key_fromCoords,
@@ -590,7 +593,7 @@ static zkey_vtab_t key3_vtab_ = {
 	bit3Key_toStr,
 	bit3Key_split,
 	bit3Key_limits_from_extent,
-	bit3Key_isSolid,
+	bit3Key_getAttr,
 	bit3Key_hasSmth,
 };
 
@@ -635,10 +638,10 @@ hilb2Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bi
 	elog(ERROR, "bit3Key_limits_from_extent not realized");
 }
 
-static bool  
-hilb2Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+static unsigned  
+hilb2Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
 {
-	return true;
+	return baSolid | baReadReady;
 }
 
 static zkey_vtab_t hilb2_vtab_ = {
@@ -651,7 +654,7 @@ static zkey_vtab_t hilb2_vtab_ = {
 	bit2Key_toStr,
 	hilb2Key_split,
 	hilb2Key_limits_from_extent,
-	hilb2Key_isSolid,
+	hilb2Key_getAttr,
 };
 
 static void  hilbKey_CTOR2(bitKey_t *pk)
@@ -958,13 +961,13 @@ hilb3Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey
 	return ret;
 }
 
-static bool  
-hilb3Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+static unsigned
+hilb3Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
 {
+	int i;
+	unsigned ret = baSolid | baReadReady;
 	uint32_t lcoords[ZKEY_MAX_COORDS];
 	uint32_t hcoords[ZKEY_MAX_COORDS];
-	int i;
-	bool ret = true;
 
 	hilb3_get_extent(minval, maxval, lcoords, hcoords);
 
@@ -972,12 +975,12 @@ hilb3Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey
 	{
 		if (lcoords[i] < bl_coords[i] || lcoords[i] > ur_coords[i])
 		{
-			ret = false;
+			ret &= ~baSolid;
 			break;
 		}
 		if (hcoords[i] < bl_coords[i] || hcoords[i] > ur_coords[i])
 		{
-			ret = false;
+			ret &= ~baSolid;
 			break;
 		}
 	}
@@ -1012,7 +1015,7 @@ static zkey_vtab_t hilb3_vtab_ = {
 	hilb3Key_toStr,
 	hilb3Key_split,
 	hilb3Key_limits_from_extent,
-	hilb3Key_isSolid,
+	hilb3Key_getAttr,
 	hilb3Key_hasSmth,
 };
 
@@ -1116,11 +1119,11 @@ void  bitKey_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords
 	minval->vtab_->f_limits_from_extent(bl_coords, ur_coords, minval, maxval);
 }
 
-bool  bitKey_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+unsigned  bitKey_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
 {
 	Assert(bl_coords && ur_coords && minval && maxval);
 	Assert(minval->vtab_ == maxval->vtab_);
-	return minval->vtab_->f_isSolid(bl_coords, ur_coords, minval, maxval);
+	return minval->vtab_->f_getAttr(bl_coords, ur_coords, minval, maxval);
 }
 
 bool  bitKey_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)

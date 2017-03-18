@@ -103,6 +103,7 @@ spt_query2_createQuery(spt_query2_t *q)
 	ret = (spatial2Query_t *)palloc(sizeof(spatial2Query_t));
 	/*ret->curBitNum_ = 0;*/
 	ret->solid_ = 0;
+	ret->read_ready_ = 0;
 	ret->ncoords_ = q->ncoords_;
 	ret->keytype_ = q->keytype_;
 	ret->prevQuery_ = NULL;
@@ -135,9 +136,10 @@ Log2(int n)
 void
 spt_query2_testSolidity (spt_query2_t *qdef, spatial2Query_t *q)
 {
-	int ok = bitKey_isSolid (qdef->min_point_, qdef->max_point_, &q->lowKey_, &q->highKey_);
-	q->solid_ = ok;
-	if (ok)
+	unsigned attr = bitKey_getAttr (qdef->min_point_, qdef->max_point_, &q->lowKey_, &q->highKey_);
+	q->solid_ = (attr & baSolid) ? 1 : 0;
+	q->read_ready_ = (attr & baReadReady) ? 1 : 0;
+	if (q->solid_)
 	{
 		q->dhighKey_ = bitKey_toLong(&q->highKey_);
 	}
