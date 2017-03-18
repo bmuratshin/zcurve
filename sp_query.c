@@ -103,6 +103,8 @@ spt_query2_createQuery(spt_query2_t *q)
 	ret = (spatial2Query_t *)palloc(sizeof(spatial2Query_t));
 	/*ret->curBitNum_ = 0;*/
 	ret->solid_ = 0;
+	ret->has_smth_ = 0;
+	ret->read_ready_ = 0;
 	ret->ncoords_ = q->ncoords_;
 	ret->keytype_ = q->keytype_;
 	ret->prevQuery_ = NULL;
@@ -135,42 +137,11 @@ Log2(int n)
 void
 spt_query2_testSolidity (spt_query2_t *qdef, spatial2Query_t *q)
 {
-/*
-	uint32_t lcoords[ZKEY_MAX_COORDS];
-	uint32_t hcoords[ZKEY_MAX_COORDS];
-	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
-	uint64_t vol = 1;
-
-	bitKey_toCoords (&q->lowKey_, lcoords, ZKEY_MAX_COORDS);
-	bitKey_toCoords (&q->highKey_, hcoords, ZKEY_MAX_COORDS);
-
-	for (i=0; i < q->ncoords_; i++)
-	{
-		dcoords[i] = hcoords[i] - lcoords[i];
-		vol *= (unsigned)(dcoords[i]);
-		if (dcoords[i]++)
-		{
-			diff = 1 << Log2(dcoords[i]);
-			if (diff != dcoords[i])
-			{
-				ok = 0;
-				break;
-			}
-			if (odiff && odiff != diff)
-			{
-				ok = 0;
-				break;
-			}
-			odiff = diff;
-		}
-	}
-	if (0 == vol)
-	{
-		ok = 0;
-	}*/
-	int ok = bitKey_isSolid (qdef->min_point_, qdef->max_point_, &q->lowKey_, &q->highKey_);
-	q->solid_ = ok;
-	if (ok)
+	unsigned attr = bitKey_getAttr (qdef->min_point_, qdef->max_point_, &q->lowKey_, &q->highKey_);
+	q->solid_ = (attr & baSolid) ? 1 : 0;
+	q->has_smth_ = (attr & baHasSmth) ? 1 : 0;
+	q->read_ready_ = (attr & baReadReady) ? 1 : 0;
+	if (q->solid_)
 	{
 		q->dhighKey_ = bitKey_toLong(&q->highKey_);
 	}
@@ -349,7 +320,7 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 
 		/* Test subquery for non-intersection with lookup extent.
 		   This can occur for some bitkey kinds (ex: hilbert). */
-		if (0 == bitKey_hasSmth (q->min_point_, q->max_point_, &q->queryHead_->lowKey_, &q->queryHead_->highKey_))
+		if (0 == q->queryHead_->has_smth_) //bitKey_hasSmth (q->min_point_, q->max_point_, &q->queryHead_->lowKey_, &q->queryHead_->highKey_))
 		{
 			/* subquery finished, let's try next one */
 			spt_query2_releaseSubQuery(q);
@@ -367,63 +338,64 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 		while (0 == q->queryHead_->solid_ && 
 			bitKey_cmp(&q->lastKey_, &q->queryHead_->highKey_) < 0)
 		{
-			bitKey_t low = q->queryHead_->lowKey_;
-			bitKey_t low_high = q->queryHead_->highKey_;
+ 			/* let's split query */
+ 			spatial2Query_t *subQuery = NULL;
 
-			bitKey_t high_low = q->queryHead_->lowKey_;
-			bitKey_t high = q->queryHead_->highKey_;
+ 			/* create neq subquery */
+ 			subQuery = spt_query2_createQuery (q);
+ 			/* push it to the queue */
+ 			subQuery->lowKey_ = q->queryHead_->lowKey_;
+ 			subQuery->highKey_ = q->queryHead_->highKey_;
 
 			bitKey_split(
-				&low, &high, 
-				&low_high, &high_low);
+				&subQuery->lowKey_, &q->queryHead_->highKey_, 
+				&subQuery->highKey_, &q->queryHead_->lowKey_);
 
-			has_smth = false;
-			if (bitKey_hasSmth (q->min_point_, q->max_point_, &high_low, &high))
+			if (bitKey_cmp(&subQuery->highKey_, &q->queryHead_->highKey_) == 0 &&
+			    bitKey_cmp(&subQuery->lowKey_, &q->queryHead_->lowKey_) == 0)
 			{
-				q->queryHead_->lowKey_ = high_low;
-				q->queryHead_->highKey_ = high;
-				spt_query2_testSolidity(q, q->queryHead_);
-				has_smth = true;
-			}
 
-			if (bitKey_hasSmth (q->min_point_, q->max_point_, &low, &low_high))
-			{
-				if (!has_smth)
-				{
-					q->queryHead_->lowKey_ = low;
-					q->queryHead_->highKey_ = low_high;
-					spt_query2_testSolidity(q, q->queryHead_);
-				}
-				else
-				{
-					spatial2Query_t *subQuery = NULL;
-					/* create neq subquery */
-					subQuery = spt_query2_createQuery (q);
-					/* push it to the queue */
-					subQuery->prevQuery_ = q->queryHead_;
-					/* init diapason */
-					subQuery->lowKey_ = low;
-					subQuery->highKey_ = low_high;
-					spt_query2_testSolidity(q, subQuery);
-					q->queryHead_ = subQuery;
-				}
-				has_smth = true;
-			}
-			if (!has_smth)
-			{
-				q->subQueryFinished_ = 1;
 				break;
 			}
-			q->subQueryFinished_ = 0;
+
+#if 0
+{
+	char buf[256];
+	bitKey_toStr(&q->lastKey_, buf, sizeof(buf));
+	elog(INFO, "lastKey %s", buf);
+	bitKey_toStr(&q->currentKey_, buf, sizeof(buf));
+	elog(INFO, "currentKey %s", buf);
+
+	bitKey_toStr(&q->queryHead_->highKey_, buf, sizeof(buf));
+	elog(INFO, "highKey %s", buf);
+	bitKey_toStr(&q->queryHead_->lowKey_, buf, sizeof(buf));
+	elog(INFO, "lowKey %s", buf);
+
+	bitKey_toStr(&subQuery->highKey_, buf, sizeof(buf));
+	elog(INFO, "shighKey %s", buf);
+	bitKey_toStr(&subQuery->lowKey_, buf, sizeof(buf));
+	elog(INFO, "slowKey %s", buf);
+
+}
+#endif
+
+
+			spt_query2_testSolidity(q, subQuery);
+			spt_query2_testSolidity(q, q->queryHead_);
+
+			/* push it to the queue */
+			subQuery->prevQuery_ = q->queryHead_;
+ 			q->queryHead_ = subQuery;
+ 			q->subQueryFinished_ = 0;
 		}
 
 		if(!spt_query2_queryFind(q, &q->queryHead_->lowKey_))
 		{
 			/* end of tree */
-			spt_query2_closeQuery (q);
+			spt_query2_closeQuery (q);                
 			return 0;
 		}
-#if 1
+#if 0
 {
 	char buf[256];
 	bitKey_toStr(&q->queryHead_->lowKey_, buf, sizeof(buf));
@@ -495,7 +467,9 @@ spt_query2_checkKey (spt_query2_t *q, uint32 *coords)
 		}
 	}
 	/* OK, return data */
-	/*elog(INFO, "Result:%d %d %d", coords[0], coords[1], coords[2]);*/
+#if 0
+	elog(INFO, "Result:%d %d\n", coords[0], coords[2]);
+#endif
 	return 1;
 }
 

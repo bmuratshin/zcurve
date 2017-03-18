@@ -43,8 +43,9 @@
 typedef struct spatial2Query_s {
 	bitKey_t lowKey_;	/* the begining of index interval */
 	bitKey_t highKey_;	/* the end of index interval */
-	/*unsigned curBitNum_ : 16;*/		/* the number of key bit that will be used to split this one to subqueries (if necessary, sure) */
 	unsigned solid_ : 1;	/* hypercube flag */
+	unsigned read_ready_ : 1;	/* low corner in lookup extent */
+	unsigned has_smth_ : 1;	/* do subquery and lookup extent intersects, other can be in Hilbert mode */
 	unsigned ncoords_ : 3;	/* dimension */
 	unsigned keytype_ : 4;	/* kind of keytype */
 	Datum    dhighKey_;	/* the same as high_key_ but in numeric for, solid requests only, optimisation */

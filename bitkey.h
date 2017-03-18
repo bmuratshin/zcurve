@@ -47,7 +47,7 @@
 		void(*f_toStr) (const bitKey_t *pk, char *buf, int buflen);
 		void(*f_split) (const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low);
 		void(*f_limits_from_extent) (const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval);
-		bool(*f_isSolid) (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
+		unsigned(*f_getAttr) (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
 		bool(*f_hasSmth) (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
 	} zkey_vtab_t;
 
@@ -81,8 +81,18 @@ typedef enum bitkey_type {
 	extern void  	bitKey_toStr(const bitKey_t *pk, char *buf, int buflen);
 	extern void 	bitKey_split(const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low);
 	extern void  	bitKey_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval);
-	extern bool	bitKey_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
-	extern bool	bitKey_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
+
+	typedef enum bitkey_attr {
+		baUnknown = 0,
+		/* if subreq is solid, we may just out its content w\o further splitting */
+		baSolid = 1,
+		/* if subreq is readready, tree lookup is suitable to start readiong, in other case let us split it more  (actual for Hilbert mode). */
+		baReadReady = 2,
+		/* if subreq has smth, its extent intersects requested one (actual for Hilbert mode) */
+		baHasSmth = 4,
+	} bitkey_attr;
+	extern unsigned	bitKey_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
+	//extern bool	bitKey_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval);
 
 
 #endif /* __ZCURVE_BITKEY_H */
