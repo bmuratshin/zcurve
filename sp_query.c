@@ -135,39 +135,6 @@ Log2(int n)
 void
 spt_query2_testSolidity (spt_query2_t *qdef, spatial2Query_t *q)
 {
-/*
-	uint32_t lcoords[ZKEY_MAX_COORDS];
-	uint32_t hcoords[ZKEY_MAX_COORDS];
-	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
-	uint64_t vol = 1;
-
-	bitKey_toCoords (&q->lowKey_, lcoords, ZKEY_MAX_COORDS);
-	bitKey_toCoords (&q->highKey_, hcoords, ZKEY_MAX_COORDS);
-
-	for (i=0; i < q->ncoords_; i++)
-	{
-		dcoords[i] = hcoords[i] - lcoords[i];
-		vol *= (unsigned)(dcoords[i]);
-		if (dcoords[i]++)
-		{
-			diff = 1 << Log2(dcoords[i]);
-			if (diff != dcoords[i])
-			{
-				ok = 0;
-				break;
-			}
-			if (odiff && odiff != diff)
-			{
-				ok = 0;
-				break;
-			}
-			odiff = diff;
-		}
-	}
-	if (0 == vol)
-	{
-		ok = 0;
-	}*/
 	int ok = bitKey_isSolid (qdef->min_point_, qdef->max_point_, &q->lowKey_, &q->highKey_);
 	q->solid_ = ok;
 	if (ok)

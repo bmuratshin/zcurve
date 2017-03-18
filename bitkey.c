@@ -69,41 +69,6 @@ bit2Key_cmp (const bitKey_t *pl, const bitKey_t *pr)
 			((pl->vals_[0] > pr->vals_[0]) ? 1 : -1);
 }
 
-#if 0
-static bool  
-bit2Key_between (const bitKey_t *ckey, const bitKey_t *lKey, const bitKey_t *hKey)
-{
-	/* bit over bit */
-  	uint64 bitMask = 0xAAAAAAAAAAAAAAAAULL;
-	int i;
-	Assert(ckey && lKey && hKey);
-
-	/* by X & Y */
-	for(i = 0; i < 2; i++, bitMask >>= 1)
-	{
-		/* current coordinate */
-		uint64 tmpK = ckey->vals_[0] & bitMask;
-		/* diapason High and Low coordinates */
-		uint64 tmpL = lKey->vals_[0] & bitMask;
-		uint64 tmpH = hKey->vals_[0] & bitMask;
-
-		if (tmpK < tmpL)
-			return 0;
-		if (tmpK > tmpH)
-			return 0;
-	}
-	/* OK, return true */
-	return 1;
-}
-
-static int 
-bit2Key_getBit (const bitKey_t *pk, int idx)
-{
-	Assert(NULL != pk);
-	return (int)(pk->vals_[0] >> (idx & 0x3f));
-}
-#endif
-
 static void 
 bit2Key_clearKey (bitKey_t *pk)
 {
@@ -312,53 +277,6 @@ bit3Key_cmp(const bitKey_t *pl, const bitKey_t *pr)
 		return ((pl->vals_[1] > pr->vals_[1]) ? 1 : -1);
 	return 0;
 }
-
-#if 0
-static bool
-bit3Key_between(const bitKey_t *ckey, const bitKey_t *lKey, const bitKey_t *hKey)
-{
-	/* bit over bit */
-	uint64 bitMask = 0x0000924924924924ULL;
-	int i;
-	Assert(ckey && lKey && hKey);
-
-	/* by X & Y & Z*/
-	for (i = 0; i < 3; i++, bitMask >>= 1)
-	{
-		/* current coordinate */
-		uint64 tmpK = ckey->vals_[0] & bitMask;
-		/* diapason High and Low coordinates */
-		uint64 tmpL = lKey->vals_[0] & bitMask;
-		uint64 tmpH = hKey->vals_[0] & bitMask;
-
-		if (tmpK < tmpL)
-			return 0;
-		if (tmpK > tmpH)
-			return 0;
-
-		tmpK = ((ckey->vals_[0] >> 48) | (ckey->vals_[1] << 16)) & bitMask;
-		/* diapason High and Low coordinates */
-		tmpL = ((lKey->vals_[0] >> 48) | (lKey->vals_[1] << 16)) & bitMask;
-		tmpH = ((hKey->vals_[0] >> 48) | (hKey->vals_[1] << 16)) & bitMask;
-
-		if (tmpK < tmpL)
-			return 0;
-		if (tmpK > tmpH)
-			return 0;
-	}
-	/* OK, return true */
-	return 1;
-}
-
-static int
-bit3Key_getBit(const bitKey_t *pk, int idx)
-{
-	int ix0 = idx >> 6; 
-	int ix1 = idx & 0x3f;
-	Assert(NULL != pk && idx < 96 && idx >= 0);
-	return (int)(pk->vals_[ix0] >> ix1);
-}
-#endif
 
 static void
 bit3Key_clearKey(bitKey_t *pk)
@@ -725,11 +643,7 @@ hilb2Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey
 
 static zkey_vtab_t hilb2_vtab_ = {
 	bit2Key_cmp,
-	/*bit2Key_between,
-	bit2Key_getBit,*/
 	bit2Key_clearKey,
-	/*bit2Key_setLowBits,
-	bit2Key_clearLowBits,*/
 	bit2Key_fromLong,
 	bit2Key_toLong,
 	hilb2Key_fromCoords,
@@ -1152,39 +1066,11 @@ int   bitKey_cmp (const bitKey_t *l, const bitKey_t *r)
 	return l->vtab_->f_cmp(l, r);
 }
 
-#if 0
-bool  bitKey_between (const bitKey_t *val, const bitKey_t *minval, const bitKey_t *maxval)
-{
-	Assert(val && minval && maxval);
-	return val->vtab_->f_between(val, minval, maxval);
-}
-
-int   bitKey_getBit (const bitKey_t *pk, int idx)
-{
-	Assert(pk);
-	return pk->vtab_->f_getBit(pk, idx);
-}
-#endif
-
 void  bitKey_clearKey (bitKey_t *pk)
 {
 	Assert(pk);
 	pk->vtab_->f_clearKey(pk);
 }
-
-/*
-void  bitKey_setLowBits (bitKey_t *pk, int idx)
-{
-	Assert(pk);
-	pk->vtab_->f_setLowBits(pk, idx);
-}
-
-void  bitKey_clearLowBits (bitKey_t *pk, int idx)
-{
-	Assert(pk);
-	pk->vtab_->f_clearLowBits(pk, idx);
-}
-*/
 
 void  bitKey_fromLong (bitKey_t *pk, Datum numeric)
 {
