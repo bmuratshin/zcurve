@@ -423,7 +423,7 @@ spt_query2_findNextMatch(spt_query2_t *q, uint32 *coords, ItemPointerData *iptr)
 			spt_query2_closeQuery (q);
 			return 0;
 		}
-#if 0
+#if 1
 {
 	char buf[256];
 	bitKey_toStr(&q->queryHead_->lowKey_, buf, sizeof(buf));

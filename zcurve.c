@@ -228,7 +228,7 @@ zcurve_Xd_lookup_tidonly(FunctionCallInfo fcinfo, char *relname, bitkey_type kty
 
 	if (SRF_IS_FIRSTCALL())
 	{
-		uint32 coords[ZKEY_MAX_COORDS] = {0, 0, 0};
+		uint32 coords[ZKEY_MAX_COORDS] = {0, 0, 0, 0, 0, 0, 0, 0};
 		//uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1};
 		ItemPointerData iptr;
 
@@ -607,3 +607,77 @@ hilbert_3d_lookup_tidonly(PG_FUNCTION_ARGS)
 
 	return zcurve_Xd_lookup_tidonly(fcinfo, relname, btHilb3D, coords, coords2);
 }
+
+
+PG_FUNCTION_INFO_V1(zcurve_num_from_8coords);
+
+Datum
+zcurve_num_from_8coords(PG_FUNCTION_ARGS)
+{
+   uint32 coords[ZKEY_MAX_COORDS] = {
+	PG_GETARG_INT64(0), PG_GETARG_INT64(1),  PG_GETARG_INT64(2),  PG_GETARG_INT64(3),
+	PG_GETARG_INT64(4), PG_GETARG_INT64(5),  PG_GETARG_INT64(6),  PG_GETARG_INT64(7),
+   };
+   bitKey_t key;
+   Datum ret;
+
+   bitKey_CTOR(&key, btZ8D);
+   bitKey_fromCoords(&key, coords, 8);
+   ret = bitKey_toLong(&key);
+#if 0
+   {
+   char buf[256];
+   bitKey_t key2;
+   bitKey_CTOR(&key2, btZ8D);
+
+
+   bitKey_fromLong(&key2, ret);
+   if (bitKey_cmp(&key, &key2))
+   {
+     bitKey_toStr(&key, buf, 256);
+     elog(INFO, "%s", buf);
+     bitKey_toStr(&key2, buf, 256);
+     elog(INFO, "%s", buf);
+   }
+
+   //coords[0] = coords[1] = coords[2] = coords[3] = 0;
+   //coords[4] = coords[5] = coords[6] = coords[7] = 0;
+   //bitKey_toCoords(&key, coords, 8);
+   //bitKey_toStr(&key, buf, 256);
+   //elog(INFO, "%s", buf);
+   }
+#endif
+   return ret;
+}
+
+PG_FUNCTION_INFO_V1(zcurve_8d_lookup_tidonly);
+Datum
+zcurve_8d_lookup_tidonly(PG_FUNCTION_ARGS)
+{
+	/* params */
+	char *relname = text_to_cstring(PG_GETARG_TEXT_PP(0)); 
+  	uint64 x0  = PG_GETARG_INT64(1);
+	uint64 y0  = PG_GETARG_INT64(2);
+	uint64 z0  = PG_GETARG_INT64(3);
+  	uint64 a0  = PG_GETARG_INT64(4);
+	uint64 b0  = PG_GETARG_INT64(5);
+	uint64 c0  = PG_GETARG_INT64(6);
+	uint64 d0  = PG_GETARG_INT64(7);
+	uint64 e0  = PG_GETARG_INT64(8);
+
+  	uint64 x1  = PG_GETARG_INT64(9);
+	uint64 y1  = PG_GETARG_INT64(10);
+	uint64 z1  = PG_GETARG_INT64(11);
+  	uint64 a1  = PG_GETARG_INT64(12);
+	uint64 b1  = PG_GETARG_INT64(13);
+	uint64 c1  = PG_GETARG_INT64(14);
+	uint64 d1  = PG_GETARG_INT64(15);
+	uint64 e1  = PG_GETARG_INT64(16);
+
+	uint32 coords[ZKEY_MAX_COORDS] = {x0, y0, z0, a0, b0, c0, d0, e0};
+	uint32 coords2[ZKEY_MAX_COORDS] = {x1, y1, z1, a1, b1, c1, d1, e1};
+
+	return zcurve_Xd_lookup_tidonly(fcinfo, relname, btZ8D, coords, coords2);
+}
+
+

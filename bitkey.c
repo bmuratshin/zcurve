@@ -33,12 +33,27 @@
  * Author:	Boris Muratshin, mailto:bmuratshin@gmail.com
  *
  */
-
+#if 1
 #include "postgres.h"
 #include "utils/numeric.h"
 #include "utils/builtins.h"
+#else
+#define _CRT_SECURE_NO_WARNINGS
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+#include <stdint.h>
+#include <assert.h>
+typedef uint64_t uint64;
+typedef uint32_t uint32;
+typedef int64_t int64;
+typedef int32_t int32;
+#define Assert assert
+#endif
+
 #include "bitkey.h"
 #include "hilbert2.h"
+
 
 #define WITH_HACKED_NUMERIC
 #ifdef WITH_HACKED_NUMERIC
@@ -68,41 +83,6 @@ bit2Key_cmp (const bitKey_t *pl, const bitKey_t *pr)
 	return (pl->vals_[0] == pr->vals_[0])? 0 :
 			((pl->vals_[0] > pr->vals_[0]) ? 1 : -1);
 }
-
-#if 0
-static bool  
-bit2Key_between (const bitKey_t *ckey, const bitKey_t *lKey, const bitKey_t *hKey)
-{
-	/* bit over bit */
-  	uint64 bitMask = 0xAAAAAAAAAAAAAAAAULL;
-	int i;
-	Assert(ckey && lKey && hKey);
-
-	/* by X & Y */
-	for(i = 0; i < 2; i++, bitMask >>= 1)
-	{
-		/* current coordinate */
-		uint64 tmpK = ckey->vals_[0] & bitMask;
-		/* diapason High and Low coordinates */
-		uint64 tmpL = lKey->vals_[0] & bitMask;
-		uint64 tmpH = hKey->vals_[0] & bitMask;
-
-		if (tmpK < tmpL)
-			return 0;
-		if (tmpK > tmpH)
-			return 0;
-	}
-	/* OK, return true */
-	return 1;
-}
-
-static int 
-bit2Key_getBit (const bitKey_t *pk, int idx)
-{
-	Assert(NULL != pk);
-	return (int)(pk->vals_[0] >> (idx & 0x3f));
-}
-#endif
 
 static void 
 bit2Key_clearKey (bitKey_t *pk)
@@ -276,11 +256,7 @@ bit2Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 
 static zkey_vtab_t key2_vtab_ = {
 	bit2Key_cmp,
-	/*bit2Key_between,
-	bit2Key_getBit,*/
 	bit2Key_clearKey,
-	/*bit2Key_setLowBits,
-	bit2Key_clearLowBits,*/
 	bit2Key_fromLong,
 	bit2Key_toLong,
 	bit2Key_fromCoords,
@@ -313,53 +289,6 @@ bit3Key_cmp(const bitKey_t *pl, const bitKey_t *pr)
 	return 0;
 }
 
-#if 0
-static bool
-bit3Key_between(const bitKey_t *ckey, const bitKey_t *lKey, const bitKey_t *hKey)
-{
-	/* bit over bit */
-	uint64 bitMask = 0x0000924924924924ULL;
-	int i;
-	Assert(ckey && lKey && hKey);
-
-	/* by X & Y & Z*/
-	for (i = 0; i < 3; i++, bitMask >>= 1)
-	{
-		/* current coordinate */
-		uint64 tmpK = ckey->vals_[0] & bitMask;
-		/* diapason High and Low coordinates */
-		uint64 tmpL = lKey->vals_[0] & bitMask;
-		uint64 tmpH = hKey->vals_[0] & bitMask;
-
-		if (tmpK < tmpL)
-			return 0;
-		if (tmpK > tmpH)
-			return 0;
-
-		tmpK = ((ckey->vals_[0] >> 48) | (ckey->vals_[1] << 16)) & bitMask;
-		/* diapason High and Low coordinates */
-		tmpL = ((lKey->vals_[0] >> 48) | (lKey->vals_[1] << 16)) & bitMask;
-		tmpH = ((hKey->vals_[0] >> 48) | (hKey->vals_[1] << 16)) & bitMask;
-
-		if (tmpK < tmpL)
-			return 0;
-		if (tmpK > tmpH)
-			return 0;
-	}
-	/* OK, return true */
-	return 1;
-}
-
-static int
-bit3Key_getBit(const bitKey_t *pk, int idx)
-{
-	int ix0 = idx >> 6; 
-	int ix1 = idx & 0x3f;
-	Assert(NULL != pk && idx < 96 && idx >= 0);
-	return (int)(pk->vals_[ix0] >> ix1);
-}
-#endif
-
 static void
 bit3Key_clearKey(bitKey_t *pk)
 {
@@ -380,7 +309,7 @@ bit3Key_setLowBits(bitKey_t *pk, int idx)
 	Assert(NULL != pk && idx < 96 && idx >= 0);
 	if (idx >= 64)
 	{
-		unsigned lidx = (idx - 64) & 0x3ff;
+		unsigned lidx = (idx - 64) & 0x3f;
 		pk->vals_[1] |= (smasks[0] >> (63 - lidx));
 		pk->vals_[1] -= (1ULL << lidx);
 		pk->vals_[0] |= smasks[idx % 3];
@@ -398,7 +327,7 @@ bit3Key_clearLowBits(bitKey_t *pk, int idx)
 	Assert(NULL != pk && idx < 96 && idx >= 0);
 	if (idx >= 64)
 	{
-		unsigned lidx = (idx - 64) & 0x3ff;
+		unsigned lidx = (idx - 64) & 0x3f;
 		pk->vals_[1] &= ~(smasks[0] >> (63 - lidx));
 		pk->vals_[1] |= (1ULL << lidx);
 		pk->vals_[0] &= ~smasks[idx % 3];
@@ -413,16 +342,17 @@ bit3Key_clearLowBits(bitKey_t *pk, int idx)
 #ifdef WITH_HACKED_NUMERIC
 static void test_numeric(const Numeric pvar, uint32_t *xdata)
 {
-	const int n = NUMERIC_NDIGITS(pvar);
-	int i,j;
+	const int weight = NUMERIC_WEIGHT(pvar);
+	const int ndigits = NUMERIC_NDIGITS(pvar);
+	int i, j;
 	int16_t *sdata = NUMERIC_DIGITS(pvar);
 
 	/*elog(INFO, "NDIGITS=%d WEIGHT=%d DSCALE=%d SIGN=%d", (int)NUMERIC_NDIGITS(pvar), (int)NUMERIC_WEIGHT(pvar), (int)NUMERIC_DSCALE(pvar), (int)NUMERIC_SIGN(pvar));*/
 
 	xdata[0] = xdata[1] = xdata[2] = xdata[3] = 0;
-	for (i = 0; i < n; i++)
+	for (i = 0; i <= weight; i++)
 	{
-		int64_t ch = sdata[i];
+		int64_t ch = (i < ndigits) ? sdata[i] : 0;
 		for (j = 0; j < 4; j++)
 		{
 			int64_t val = ((int64_t)xdata[j]) * 10000;
@@ -489,7 +419,6 @@ bit3Key_toLong(const bitKey_t *pk)
 	Datum nm = DirectFunctionCall2(numeric_mul, mul_result, upper_result);
 	return  DirectFunctionCall2(numeric_add, nm, low_result);
 }
-
 
 
 static uint32 key3ToBits[16] = {
@@ -596,6 +525,23 @@ bit3Key_split (const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, 
 	bit3Key_setLowBits(lower_high, curBitNum);
 	/* cut diapason by curBitNum for old subquery */
 	bit3Key_clearLowBits(upper_low, curBitNum);
+#if 0
+	//elog(INFO, "split(%d)", curBitNum);
+	//elog((cnt++==50)?ERROR:INFO, "split(%d)", curBitNum);
+	//char buf[256];
+	//bit3Key_toStr(low, buf, 256);
+	//elog(INFO, "%s", buf);
+	bit3Key_toStr(high, buf, 256);
+	elog(INFO, "%s", buf);
+	/* cut diapason by curBitNum for new subquery */
+	bit3Key_setLowBits(lower_high, curBitNum);
+	/* cut diapason by curBitNum for old subquery */
+	bit3Key_clearLowBits(upper_low, curBitNum);
+	bit3Key_toStr(lower_high, buf, 256);
+	elog(INFO, "%s", buf);
+	bit3Key_toStr(upper_low, buf, 256);
+	elog(INFO, "%s", buf);
+#endif
 }
 
 static void
@@ -660,11 +606,7 @@ bit3Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 
 static zkey_vtab_t key3_vtab_ = {
 	bit3Key_cmp,
-	/*bit3Key_between,
-	bit3Key_getBit,*/
 	bit3Key_clearKey,
-	/*bit3Key_setLowBits,
-	bit3Key_clearLowBits,*/
 	bit3Key_fromLong,
 	bit3Key_toLong,
 	bit3Key_fromCoords,
@@ -681,6 +623,385 @@ static void  bitKey_CTOR3(bitKey_t *pk)
 	Assert(pk);
 	memset(pk->vals_, 0, sizeof(pk->vals_));
 	pk->vtab_ = &key3_vtab_;
+}
+
+
+/* 8D -------------------------------------------------------------------------------------------------------- */
+
+static int
+bit8Key_cmp(const bitKey_t *pl, const bitKey_t *pr)
+{
+	Assert(pl && pr);
+	if ((pl->vals_[3] != pr->vals_[3]))
+		return ((pl->vals_[3] > pr->vals_[3]) ? 1 : -1);
+	if ((pl->vals_[2] != pr->vals_[2]))
+		return ((pl->vals_[2] > pr->vals_[2]) ? 1 : -1);
+	if ((pl->vals_[1] != pr->vals_[1]))
+		return ((pl->vals_[1] > pr->vals_[1]) ? 1 : -1);
+	if ((pl->vals_[0] != pr->vals_[0]))
+		return ((pl->vals_[0] > pr->vals_[0]) ? 1 : -1);
+	return 0;
+}
+
+static void
+bit8Key_clearKey(bitKey_t *pk)
+{
+	Assert(NULL != pk);
+	pk->vals_[0] = 0;
+	pk->vals_[1] = 0;
+	pk->vals_[2] = 0;
+	pk->vals_[3] = 0;
+}
+
+static const uint64 smasks8[8] = {
+	0x0101010101010101ULL,
+	0x0202020202020202ULL,
+	0x0404040404040404ULL,
+	0x0808080808080808ULL,
+	0x1010101010101010ULL,
+	0x2020202020202020ULL,
+	0x4040404040404040ULL,
+	0x8080808080808080ULL,
+};
+
+static void
+bit8Key_setLowBits(bitKey_t *pk, int idx)
+{
+	int lidx = idx;
+	Assert(NULL != pk && idx < 256 && idx >= 0);
+	for (; lidx > 0; lidx -= 64)
+	{
+		unsigned ix = lidx >> 6;
+		if (idx == lidx)
+		{
+			unsigned llidx = (lidx % 64);
+			pk->vals_[ix] |= (smasks8[7] >> (63 - llidx));
+			pk->vals_[ix] -= (1ULL << llidx);
+		}
+		else
+		{
+			pk->vals_[ix] |= smasks8[lidx & 7];
+		}
+	}
+}
+
+static void
+bit8Key_clearLowBits(bitKey_t *pk, int idx)
+{
+	int lidx = idx;
+	Assert(NULL != pk && idx < 256 && idx >= 0);
+	for (; lidx > 0; lidx -= 64)
+	{
+		unsigned ix = lidx >> 6;
+		if (idx == lidx)
+		{
+			unsigned llidx = (lidx % 64);
+			pk->vals_[ix] &= ~(smasks8[7] >> (63 - llidx));
+			pk->vals_[ix] |= (1ULL << llidx);
+		}
+		else
+		{
+			pk->vals_[ix] &= ~(smasks8[lidx & 7]);
+		}
+	}
+}
+
+#ifdef WITH_HACKED_NUMERIC
+static void test_numeric8(const Numeric pvar, uint32_t *xdata)
+{
+	const int weight = NUMERIC_WEIGHT(pvar);
+	const int ndigits = NUMERIC_NDIGITS(pvar);
+	int i, j;
+	int16_t *sdata = NUMERIC_DIGITS(pvar);
+
+	/*elog(INFO, "NDIGITS=%d WEIGHT=%d DSCALE=%d SIGN=%d", (int)NUMERIC_NDIGITS(pvar), (int)NUMERIC_WEIGHT(pvar), (int)NUMERIC_DSCALE(pvar), (int)NUMERIC_SIGN(pvar));*/
+
+	xdata[0] = xdata[1] = xdata[2] = xdata[3] = 0;
+	xdata[4] = xdata[5] = xdata[6] = xdata[7] = 0;
+	for (i = 0; i <= weight; i++)
+	{
+		int64_t ch = (i < ndigits) ? sdata[i] : 0;
+		for (j = 0; j < 8; j++)
+		{
+			int64_t val = ((int64_t)xdata[j]) * 10000;
+			val += ch;
+			xdata[j] = val & 0xffffffff;
+			ch = val >> 32;
+		}
+	}
+}
+#endif
+
+static void
+bit8Key_fromLong(bitKey_t *pk, Datum dt)
+{
+#ifdef WITH_HACKED_NUMERIC
+uint32_t 	xdata[8];
+const int n = NUMERIC_NDIGITS(DatumGetNumeric(dt));
+
+Assert(NULL != pk);
+if (n < 5)
+{
+pk->vals_[0] = DatumGetInt64(DirectFunctionCall1(numeric_int8, dt));
+pk->vals_[1] = 0;
+return;
+}
+
+test_numeric8(DatumGetNumeric(dt), xdata);
+pk->vals_[0] = (((uint64_t)xdata[1]) << 32) + xdata[0];
+pk->vals_[1] = (((uint64_t)xdata[3]) << 32) + xdata[2];
+pk->vals_[2] = (((uint64_t)xdata[5]) << 32) + xdata[4];
+pk->vals_[3] = (((uint64_t)xdata[7]) << 32) + xdata[6];
+return;
+#else
+Datum		divisor_numeric;
+Datum		divisor_int64;
+Datum		low_result;
+Datum		upper_result;
+
+divisor_int64 = Int64GetDatum((int64) (1ULL << 48));
+divisor_numeric = DirectFunctionCall1(int8_numeric, divisor_int64);
+
+low_result = DirectFunctionCall2(numeric_mod, dt, divisor_numeric);
+upper_result = DirectFunctionCall2(numeric_div_trunc, dt, divisor_numeric);
+pk->vals_[0] = DatumGetInt64(DirectFunctionCall1(numeric_int8, low_result));
+pk->vals_[1] = DatumGetInt64(DirectFunctionCall1(numeric_int8, upper_result));
+pk->vals_[0] |= (pk->vals_[1] & 0xffff) << 48;
+pk->vals_[1] >>= 16;
+#endif
+#if 0
+if ((pk->vals_[0] & 0xffffffff) != xdata[0])
+{
+elog(ERROR, "bitKey <%lx %lx %lx vs %x %x %x>", pk->vals_[0], pk->vals_[1], pk->vals_[2], xdata[0], xdata[1], xdata[2]);
+}
+#endif
+}
+
+static Datum
+bit8Key_toLong(const bitKey_t *pk)
+{
+  int i;
+  Datum lval = DirectFunctionCall1(int8_numeric, Int64GetDatum(1ULL << 32));
+  Datum mul64_result = DirectFunctionCall2(numeric_mul, lval, lval);
+  Datum nm = DirectFunctionCall1(int8_numeric, Int64GetDatum(0ULL));
+  for (i = 0; i < 4; i++)
+  {
+    nm = DirectFunctionCall2(numeric_mul, nm, mul64_result);
+    lval = DirectFunctionCall1(int8_numeric, Int64GetDatum(pk->vals_[3 - i]));
+    nm = DirectFunctionCall2(numeric_add, nm, lval);
+  }
+  return nm;
+}
+
+static const uint32 key8ToBits[16] = {
+	0, 1, (1 << 8), 1 | (1 << 8),
+	(1 << 16), (1 << 16) | 1, (1 << 16) | (1 << 8), 1 | (1 << 8) | (1 << 16),
+	(1 << 24), (1 << 24) | 1, (1 << 24) | (1 << 8), 1 | (1 << 8) | (1 << 24),
+	(1 << 16) | (1 << 24), (1 << 16) | (1 << 24) | 1, (1 << 24) | (1 << 16) | (1 << 8), 1 | (1 << 8) | (1 << 16) | (1 << 24),
+};
+
+static void
+bit8Key_fromCoords(bitKey_t *pk, const uint32 *coords, int n)
+{
+	int i, j;
+	uint32 x = coords[0];
+	uint32 y = coords[1];
+	uint32 z = coords[2];
+	uint32 a = coords[3];
+	uint32 b = coords[4];
+	uint32 c = coords[5];
+	uint32 d = coords[6];
+	uint32 e = coords[7];
+	Assert(pk && coords && n >= 8);
+
+	pk->vals_[0] = pk->vals_[1] = pk->vals_[2] = pk->vals_[3] = 0;
+	for (i = 0; i < 4; i++)
+	{
+		for (j = 0; j < 2; j++)
+		{
+			uint64 tmp =
+				(key8ToBits[x & 0xf]) |
+				(key8ToBits[y & 0xf] << 1) |
+				(key8ToBits[z & 0xf] << 2) |
+				(key8ToBits[a & 0xf] << 3) |
+				(key8ToBits[b & 0xf] << 4) |
+				(key8ToBits[c & 0xf] << 5) |
+				(key8ToBits[d & 0xf] << 6) |
+				(key8ToBits[e & 0xf] << 7);
+			pk->vals_[i] |= (tmp << (j << 5));
+			x >>= 4; y >>= 4; z >>= 4;
+			a >>= 4; b >>= 4; c >>= 4;
+			d >>= 4; e >>= 4;
+		}
+	}
+}
+
+static void
+bit8Key_toCoords(const bitKey_t *pk, uint32 *coords, int n)
+{
+	int i, j, k;
+
+	Assert(pk && coords && n >= 8);
+	memset(coords, 0, 8 * sizeof(*coords));
+	/* 8 X 4 */
+	for (i = 0; i < 4; i++)
+	{
+		for (j = 0; j < 2; j++)
+		{
+			uint32 tmp = (pk->vals_[i] >> (j << 5)) & 0xffffffff;
+			for (k = 0; k < 8; k++)
+			{
+				uint64 tmpx = 
+					((tmp & (1 << k)) >> k) +
+					((tmp & (1 << (8 + k))) >> (7 + k)) +
+					((tmp & (1 << (16 + k))) >> (14 + k)) +
+					((tmp & (1 << (24 + k))) >> (21 + k));
+				coords[k] |= tmpx << (((i << 1) + j) << 2);
+			}
+		}
+	}
+}
+
+static void
+bit8Key_toStr(const bitKey_t *pk, char *buf, int buflen)
+{
+	uint32 coords[8];
+	bit8Key_toCoords(pk, coords, 8);
+	Assert(pk && buf && buflen >= 256);
+	sprintf(buf, "[%x %x %x %x %x %x %x %x]: %d %d %d %d %d %d %d %d",
+		(int)((pk->vals_[3] >> 32) & 0xffffffff),
+		(int)(pk->vals_[3] & 0xffffffff),
+		(int)((pk->vals_[2] >> 32) & 0xffffffff),
+		(int)(pk->vals_[2] & 0xffffffff),
+		(int)((pk->vals_[1] >> 32) & 0xffffffff),
+		(int)(pk->vals_[1] & 0xffffffff),
+		(int)((pk->vals_[0] >> 32) & 0xffffffff),
+		(int)(pk->vals_[0] & 0xffffffff),
+		(int)coords[0],
+		(int)coords[1],
+		(int)coords[2],
+		(int)coords[3],
+		(int)coords[4],
+		(int)coords[5],
+		(int)coords[6],
+		(int)coords[7]);
+}
+
+static void
+bit8Key_split(const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, bitKey_t *upper_low)
+{
+	static int cnt = 0;
+	char buf[256];
+	int curBitNum = 32 * 8 - 1;
+
+	for (; curBitNum; curBitNum--)
+	{
+		int ix0 = curBitNum >> 6;
+		int ix1 = curBitNum & 0x3f;
+		if ((low->vals_[ix0] >> ix1) != (high->vals_[ix0] >> ix1))
+			break;
+	}
+	/* cut diapason by curBitNum for new subquery */
+	bit8Key_setLowBits(lower_high, curBitNum);
+	/* cut diapason by curBitNum for old subquery */
+	bit8Key_clearLowBits(upper_low, curBitNum);
+#if 0
+	//elog(INFO, "split(%d)", curBitNum);
+	//elog((cnt++==20)?ERROR:INFO, "split(%d)", curBitNum);
+	bit8Key_toStr(low, buf, 256);
+	elog(INFO, "%s", buf);
+	bit8Key_toStr(high, buf, 256);
+	elog(INFO, "%s", buf);
+	/* cut diapason by curBitNum for new subquery */
+	bit8Key_setLowBits(lower_high, curBitNum);
+	/* cut diapason by curBitNum for old subquery */
+	bit8Key_clearLowBits(upper_low, curBitNum);
+	bit8Key_toStr(lower_high, buf, 256);
+	elog(INFO, "%s", buf);
+	bit8Key_toStr(upper_low, buf, 256);
+	elog(INFO, "%s", buf);
+#endif
+}
+
+static void
+bit8Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval)
+{
+	bit8Key_fromCoords(minval, bl_coords, 8);
+	bit8Key_fromCoords(maxval, ur_coords, 8);
+}
+
+static bool
+bit8Key_isSolid(const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+	uint32_t lcoords[ZKEY_MAX_COORDS];
+	uint32_t hcoords[ZKEY_MAX_COORDS];
+	int dcoords[ZKEY_MAX_COORDS], i, ok = 1, diff = 0, odiff = 0;
+	uint64_t vol = 1;
+
+	bit8Key_toCoords(minval, lcoords, ZKEY_MAX_COORDS);
+	bit8Key_toCoords(maxval, hcoords, ZKEY_MAX_COORDS);
+
+	for (i = 0; i < 8; i++)
+	{
+		dcoords[i] = hcoords[i] - lcoords[i];
+		vol *= (unsigned)(dcoords[i]);
+		if (dcoords[i]++)
+		{
+			diff = 1 << Log2(dcoords[i]);
+			if (diff != dcoords[i])
+			{
+				ok = 0;
+				break;
+			}
+			if (odiff && odiff != diff)
+			{
+				ok = 0;
+				break;
+			}
+			odiff = diff;
+		}
+	}
+	if (0 == vol)
+	{
+		ok = 0;
+	}
+#if 0
+	/* gnuplot line compatible output*/
+	elog(INFO, "%d %d", lcoords[0], lcoords[2]);
+	elog(INFO, "%d %d", lcoords[0], hcoords[2]);
+	elog(INFO, "%d %d", hcoords[0], hcoords[2]);
+	elog(INFO, "%d %d", hcoords[0], lcoords[2]);
+	elog(INFO, "%d %d %d %d %d %llu %c", lcoords[0], lcoords[2], dcoords[0], dcoords[1], dcoords[2], vol, ok ? '*' : ' ');
+	elog(INFO, "");
+#endif
+	return ok != 0;
+}
+
+static bool
+bit8Key_hasSmth(const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
+{
+	return true;
+}
+
+static zkey_vtab_t key8_vtab_ = {
+	bit8Key_cmp,
+	bit8Key_clearKey,
+	bit8Key_fromLong,
+	bit8Key_toLong,
+	bit8Key_fromCoords,
+	bit8Key_toCoords,
+	bit8Key_toStr,
+	bit8Key_split,
+	bit8Key_limits_from_extent,
+	bit8Key_isSolid,
+	bit8Key_hasSmth,
+};
+
+static void  bitKey_CTOR8(bitKey_t *pk)
+{
+	Assert(pk);
+	memset(pk->vals_, 0, sizeof(pk->vals_));
+	pk->vtab_ = &key8_vtab_;
 }
 
 
@@ -714,7 +1035,7 @@ hilb2Key_split(const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, 
 static void
 hilb2Key_limits_from_extent(const uint32 *bl_coords, const uint32 *ur_coords, bitKey_t *minval, bitKey_t *maxval)
 {
-	elog(ERROR, "bit3Key_limits_from_extent not realized");
+	elog(ERROR, "hilb2Key_limits_from_extent not realized");
 }
 
 static bool  
@@ -725,11 +1046,7 @@ hilb2Key_isSolid (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey
 
 static zkey_vtab_t hilb2_vtab_ = {
 	bit2Key_cmp,
-	/*bit2Key_between,
-	bit2Key_getBit,*/
 	bit2Key_clearKey,
-	/*bit2Key_setLowBits,
-	bit2Key_clearLowBits,*/
 	bit2Key_fromLong,
 	bit2Key_toLong,
 	hilb2Key_fromCoords,
@@ -1126,7 +1443,10 @@ void  bitKey_CTOR (bitKey_t *pk, bitkey_type ktype)
 		case btHilb3D: 
 			hilbKey_CTOR3(pk);
 			break;
-		default:
+		case btZ8D:
+			bitKey_CTOR8(pk);
+			break;
+		default:;
 			elog(ERROR, "bitKey for '%d' type has not been yet realized", ktype);
 	};
 }
@@ -1138,7 +1458,8 @@ unsigned bitKey_getNCoords(bitkey_type ktype)
 		case btZ3D: 	return 3;
 		case btHilb2D:	return 2;
 		case btHilb3D:	return 3;
-		default:
+		case btZ8D:		return 8;
+		default:;
 			elog(ERROR, "bitKey for '%d' type has not been yet realized", ktype);
 	};
 	return 0;
@@ -1152,39 +1473,11 @@ int   bitKey_cmp (const bitKey_t *l, const bitKey_t *r)
 	return l->vtab_->f_cmp(l, r);
 }
 
-#if 0
-bool  bitKey_between (const bitKey_t *val, const bitKey_t *minval, const bitKey_t *maxval)
-{
-	Assert(val && minval && maxval);
-	return val->vtab_->f_between(val, minval, maxval);
-}
-
-int   bitKey_getBit (const bitKey_t *pk, int idx)
-{
-	Assert(pk);
-	return pk->vtab_->f_getBit(pk, idx);
-}
-#endif
-
 void  bitKey_clearKey (bitKey_t *pk)
 {
 	Assert(pk);
 	pk->vtab_->f_clearKey(pk);
 }
-
-/*
-void  bitKey_setLowBits (bitKey_t *pk, int idx)
-{
-	Assert(pk);
-	pk->vtab_->f_setLowBits(pk, idx);
-}
-
-void  bitKey_clearLowBits (bitKey_t *pk, int idx)
-{
-	Assert(pk);
-	pk->vtab_->f_clearLowBits(pk, idx);
-}
-*/
 
 void  bitKey_fromLong (bitKey_t *pk, Datum numeric)
 {

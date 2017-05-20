@@ -58,11 +58,12 @@ typedef enum bitkey_type {
     btZ3D = 2,
     btHilb2D = 3,
     btHilb3D = 4,
+    btZ8D = 5,
 } bitkey_type;
 
 	/* key stuff ------------------------------------------------------------------------------- */
-#define ZKEY_BUFLEN_BY_WORDS64 3
-#define ZKEY_MAX_COORDS 6
+#define ZKEY_BUFLEN_BY_WORDS64 4
+#define ZKEY_MAX_COORDS 8
 	typedef struct bitKey_s {
 		zkey_vtab_t 	*vtab_;
 		uint64 		vals_[ZKEY_BUFLEN_BY_WORDS64];
