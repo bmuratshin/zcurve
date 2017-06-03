@@ -254,11 +254,6 @@ bit2Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 	return ok;
 }
 
-//static bool  
-//bit2Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
-//{
-//	return true;
-//}
 
 static zkey_vtab_t key2_vtab_ = {
 	bit2Key_cmp,
@@ -271,7 +266,6 @@ static zkey_vtab_t key2_vtab_ = {
 	bit2Key_split,
 	bit2Key_limits_from_extent,
 	bit2Key_getAttr,
-	//bit2Key_hasSmth,
 };
 
 static void  bitKey_CTOR2 (bitKey_t *pk)
@@ -609,11 +603,6 @@ bit3Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_
 	return ok;
 }
 
-//static bool  
-//bit3Key_hasSmth (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey_t *minval, const bitKey_t *maxval)
-//{
-//	return true;
-//}
 
 static zkey_vtab_t key3_vtab_ = {
 	bit3Key_cmp,
@@ -626,7 +615,6 @@ static zkey_vtab_t key3_vtab_ = {
 	bit3Key_split,
 	bit3Key_limits_from_extent,
 	bit3Key_getAttr,
-//	bit3Key_hasSmth,
 };
 
 static void  bitKey_CTOR3(bitKey_t *pk)
@@ -792,13 +780,23 @@ static Datum
 bit8Key_toLong(const bitKey_t *pk)
 {
   int i;
-  Datum lval = DirectFunctionCall1(int8_numeric, Int64GetDatum(1ULL << 32));
-  Datum mul64_result = DirectFunctionCall2(numeric_mul, lval, lval);
+  uint32 halfs[8] = {
+	(uint32)((pk->vals_[3] >> 32) & 0xffffffff),
+	(uint32)(pk->vals_[3] & 0xffffffff),
+	(uint32)((pk->vals_[2] >> 32) & 0xffffffff),
+	(uint32)(pk->vals_[2] & 0xffffffff),
+	(uint32)((pk->vals_[1] >> 32) & 0xffffffff),
+	(uint32)(pk->vals_[1] & 0xffffffff),
+	(uint32)((pk->vals_[0] >> 32) & 0xffffffff),
+	(uint32)(pk->vals_[0] & 0xffffffff),
+  };
+  Datum lval;
+  Datum mul64_result = DirectFunctionCall1(int8_numeric, Int64GetDatum(1ULL << 32));
   Datum nm = DirectFunctionCall1(int8_numeric, Int64GetDatum(0ULL));
-  for (i = 0; i < 4; i++)
+  for (i = 0; i < 8; i++)
   {
     nm = DirectFunctionCall2(numeric_mul, nm, mul64_result);
-    lval = DirectFunctionCall1(int8_numeric, Int64GetDatum(pk->vals_[3 - i]));
+    lval = DirectFunctionCall1(int8_numeric, Int64GetDatum(halfs[i]));
     nm = DirectFunctionCall2(numeric_add, nm, lval);
   }
   return nm;
@@ -920,7 +918,7 @@ bit8Key_split(const bitKey_t *low, const bitKey_t *high, bitKey_t *lower_high, b
 	static int cnt = 0;
 	char buf[256];
 	elog(INFO, "split(%d)", curBitNum);
-	//elog((cnt++==20)?ERROR:INFO, "split(%d)", curBitNum);
+	/*elog((cnt++==20)?ERROR:INFO, "split(%d)", curBitNum);*/
 	bit8Key_toStr(low, buf, 256);
 	elog(INFO, "low       %s", buf);
 	bit8Key_toStr(high, buf, 256);
@@ -1390,7 +1388,6 @@ hilb3Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey
 		if (lcoords[i] < bl_coords[i] || lcoords[i] > ur_coords[i])
 		{
 			ret &= ~baSolid;
-		//	ret &= ~baReadReady;
 		}
 		if (hcoords[i] < bl_coords[i] || hcoords[i] > ur_coords[i])
 		{
