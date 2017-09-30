@@ -1380,6 +1380,7 @@ hilb3Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey
 	unsigned ret = baSolid | baReadReady | baHasSmth;
 	uint32_t lcoords[ZKEY_MAX_COORDS];
 	uint32_t hcoords[ZKEY_MAX_COORDS];
+	uint32_t coords[ZKEY_MAX_COORDS];
 
 	hilb3_get_extent(minval, maxval, lcoords, hcoords);
 
@@ -1398,10 +1399,17 @@ hilb3Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey
 			ret &= ~baHasSmth;
 		}
 	}
-
+	hilb3Key_toCoords(minval, coords, 3);
+	for (i = 0; i < 3; i++)
+	{
+		if (coords[i] > ur_coords[i] || coords[i] < bl_coords[i])
+		{
+			ret &= ~baReadReady;
+		}
+	}
 #if 0
 	{
-	bool has_smth = hilb3Key_hasSmth (bl_coords, ur_coords, minval, maxval);
+	bool has_smth = true;//hilb3Key_hasSmth (bl_coords, ur_coords, minval, maxval);
 	/* gnuplot line compatible output*/
 	uint32 minx = MIN(lcoords[0], hcoords[0]);
 	uint32 maxx = MAX(lcoords[0], hcoords[0]);
@@ -1411,7 +1419,7 @@ hilb3Key_getAttr (const uint32 *bl_coords, const uint32 *ur_coords, const bitKey
 	elog(INFO, "%d %d",minx, maxy);
 	elog(INFO, "%d %d",maxx, maxy);
 	elog(INFO, "%d %d",maxx, miny);
-	elog(INFO, "%d %d %c %c",minx, miny, ret?'*':' ', has_smth? '+': '-');
+	elog(INFO, "%d %d %x",minx, miny, ret);
 	elog(INFO, "");
 	}
 #endif

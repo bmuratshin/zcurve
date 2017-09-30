@@ -66,6 +66,7 @@ typedef struct spt_query2_s {
 
 	bitKey_t currentKey_;			/* cursor position value, initially, left bottom corner of lookup extent */
 	bitKey_t lastKey_;			/* the max value for currently executed subquery, initially, right upper corner of lookup extent */
+	bool has_lastKey_;			/* indicates what there was at least one tree lookup (Hilbert) */
 
 	bool subQueryFinished_;			/* automata state flag */
 	ItemPointerData iptr_;			/* temporarily stored current t_tid */
